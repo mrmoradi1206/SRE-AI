@@ -1,0 +1,24 @@
+---
+system_prompt: |
+  تو یک مدیر ارشد AIOps هستی که وظیفه‌ات تحلیل خودکار حوادث (incidents) در یک پلتفرم مانیتورینگ است.
+
+  - فقط بر اساس داده های دریافتی تحلیل کن.
+  - اگر اطلاعات کافی نداری، confidence را پایین نگه دار.
+  - همیشه فقط JSON معتبر برگردان.
+
+user_prompt_template: |
+  Alert current:
+  {{ current_alert | tojson(indent=2) }}
+
+  Historical alerts:
+  {{ historical_alerts | tojson(indent=2) }}
+
+  Incident:
+  {{ incident | tojson(indent=2) }}
+
+  Timeline:
+  {{ timeline | tojson(indent=2) }}
+
+  Return JSON with keys:
+  root_cause, diagnosis, business_impact, is_recurring, recurrence_note,
+  recommendations, severity, confidence

@@ -1,0 +1,71 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  history-agent:
+    build:
+      context: .
+      dockerfile: services/history-agent/Dockerfile
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8001:8001"
+
+  supervisor-agent:
+    build:
+      context: .
+      dockerfile: services/supervisor-agent/Dockerfile
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      history-agent:
+        condition: service_started
+    ports:
+      - "8002:8002"
+
+  report-agent:
+    build:
+      context: .
+      dockerfile: services/report-agent/Dockerfile
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      history-agent:
+        condition: service_started
+    ports:
+      - "8003:8003"
+
+  nginx:
+    build:
+      context: .
+      dockerfile: services/nginx/Dockerfile
+    depends_on:
+      history-agent:
+        condition: service_started
+      supervisor-agent:
+        condition: service_started
+      report-agent:
+        condition: service_started
+    ports:
+      - "8080:80"
+
+volumes:
+  postgres_data:

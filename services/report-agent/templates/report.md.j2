@@ -1,0 +1,21 @@
+### {{ incident.title }}
+
+- Incident ID: `{{ incident.id }}`
+- Severity: `{{ incident.severity }}`
+- Status: `{{ incident.status }}`
+- Root Cause: {{ incident.get('root_cause') or 'pending analysis' }}
+- Business Impact: {{ incident.get('business_impact') or 'not available' }}
+
+#### Recommendations
+{% for recommendation in incident.get('recommendations', []) %}
+{{ recommendation.priority }}. {{ recommendation.action }} - {{ recommendation.rationale }}
+{% else %}
+1. Investigate manually; no automated recommendation available.
+{% endfor %}
+
+#### Recent Timeline
+{% for item in timeline[:5] %}
+- {{ item.created_at }} | {{ item.agent_name }} | {{ item.action }} | {{ item.status }}
+{% else %}
+- No timeline entries recorded.
+{% endfor %}
