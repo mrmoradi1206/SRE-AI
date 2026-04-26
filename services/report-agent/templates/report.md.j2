@@ -1,21 +1,30 @@
-### {{ incident.title }}
+# Incident Report
 
-- Incident ID: `{{ incident.id }}`
-- Severity: `{{ incident.severity }}`
-- Status: `{{ incident.status }}`
-- Root Cause: {{ incident.get('root_cause') or 'pending analysis' }}
-- Business Impact: {{ incident.get('business_impact') or 'not available' }}
+- Incident: {{ incident.id }}
+- Summary: {{ incident.summary or 'n/a' }}
+- Fingerprint: {{ incident.fingerprint }}
+- Status: {{ incident.status }}
+- Severity: {{ incident.severity }}
+- Generated at: {{ generated_at }}
+- Generator: {{ provider }} / {{ model }}
 
-#### Recommendations
-{% for recommendation in incident.get('recommendations', []) %}
-{{ recommendation.priority }}. {{ recommendation.action }} - {{ recommendation.rationale }}
-{% else %}
-1. Investigate manually; no automated recommendation available.
+## Alerts
+{% if alerts %}
+{% for alert in alerts %}
+- `{{ alert.event_key }}` | {{ alert.severity }} | {{ alert.created_at }} | {{ alert.source or 'unknown-source' }}
 {% endfor %}
-
-#### Recent Timeline
-{% for item in timeline[:5] %}
-- {{ item.created_at }} | {{ item.agent_name }} | {{ item.action }} | {{ item.status }}
 {% else %}
-- No timeline entries recorded.
+- No alerts linked to this incident.
+{% endif %}
+
+## Timeline
+{% if timeline %}
+{% for event in timeline %}
+- #{{ event.sequence_number }} | {{ event.event_type }} | {{ event.actor }} | {{ event.created_at }}
 {% endfor %}
+{% else %}
+- No timeline entries yet.
+{% endif %}
+
+## Summary
+This report was generated from the history stream and persisted as a `report_generated` event without changing lifecycle state.

@@ -1,0 +1,5 @@
+reflog: only clone entry present
+git fsck --lost-found: no output
+git fsck --full --no-reflogs --lost-found: no output
+git fsck --full | grep "blob": no matches
+VS Code history path ~/.config/Code/User/History not found

@@ -1,0 +1,41 @@
+zip_extracted:/mnt/d/sre ai/SRE-AI/SRE-AI.zip -> /mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/zip_snapshot
+zip_entry:shared/ai_client/
+zip_entry:shared/ai_client/__pycache__/
+zip_entry:shared/ai_client/__pycache__/base.cpython-312.pyc
+zip_entry:shared/ai_client/__pycache__/config.cpython-312.pyc
+zip_entry:shared/ai_client/__pycache__/examples.cpython-312.pyc
+zip_entry:shared/ai_client/__pycache__/gateway_client.cpython-312.pyc
+zip_entry:shared/ai_client/__pycache__/models.cpython-312.pyc
+zip_entry:shared/ai_client/__pycache__/openrouter_client.cpython-312.pyc
+zip_entry:shared/ai_client/__pycache__/__init__.cpython-312.pyc
+zip_entry:tests/
+zip_entry:tests/__pycache__/
+zip_entry:tests/__pycache__/test_ai_client.cpython-312.pyc
+zip_entry:tests/__pycache__/test_frontend_assets.cpython-312.pyc
+zip_entry:tests/__pycache__/test_history_routes.cpython-312.pyc
+zip_entry:tests/__pycache__/test_history_storage.cpython-312.pyc
+zip_entry:tests/__pycache__/test_http_client.cpython-312.pyc
+pyc_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/shared/ai_client/__pycache__/__init__.cpython-312.pyc
+disassembly_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/shared/ai_client/__pycache__/__init__.cpython-312.dis.txt
+pyc_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/shared/ai_client/__pycache__/base.cpython-312.pyc
+disassembly_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/shared/ai_client/__pycache__/base.cpython-312.dis.txt
+pyc_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/shared/ai_client/__pycache__/config.cpython-312.pyc
+disassembly_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/shared/ai_client/__pycache__/config.cpython-312.dis.txt
+pyc_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/shared/ai_client/__pycache__/examples.cpython-312.pyc
+disassembly_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/shared/ai_client/__pycache__/examples.cpython-312.dis.txt
+pyc_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/shared/ai_client/__pycache__/gateway_client.cpython-312.pyc
+disassembly_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/shared/ai_client/__pycache__/gateway_client.cpython-312.dis.txt
+pyc_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/shared/ai_client/__pycache__/models.cpython-312.pyc
+disassembly_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/shared/ai_client/__pycache__/models.cpython-312.dis.txt
+pyc_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/shared/ai_client/__pycache__/openrouter_client.cpython-312.pyc
+disassembly_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/shared/ai_client/__pycache__/openrouter_client.cpython-312.dis.txt
+pyc_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/tests/__pycache__/test_ai_client.cpython-312.pyc
+disassembly_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/tests/__pycache__/test_ai_client.cpython-312.dis.txt
+pyc_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/tests/__pycache__/test_frontend_assets.cpython-312.pyc
+disassembly_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/tests/__pycache__/test_frontend_assets.cpython-312.dis.txt
+pyc_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/tests/__pycache__/test_history_routes.cpython-312.pyc
+disassembly_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/tests/__pycache__/test_history_routes.cpython-312.dis.txt
+pyc_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/tests/__pycache__/test_history_storage.cpython-312.pyc
+disassembly_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/tests/__pycache__/test_history_storage.cpython-312.dis.txt
+pyc_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/tests/__pycache__/test_http_client.cpython-312.pyc
+disassembly_saved:/mnt/d/sre ai/SRE-AI/__recovered/run-20260426-125513/pyc_artifacts/tests/__pycache__/test_http_client.cpython-312.dis.txt

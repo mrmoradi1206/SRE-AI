@@ -1,27 +1,37 @@
-# AIOps Platform
+# SRE-AI
 
-A Docker-first multi-agent incident investigation platform composed of three FastAPI services:
+SRE-AI is a Docker-first multi-agent incident workflow with three FastAPI services, PostgreSQL, and an nginx-served React SPA.
 
-- `history-agent`: ingests Alertmanager webhooks, deduplicates alerts, and stores incident history.
-- `supervisor-agent`: fetches context, analyzes incidents with OpenRouter, and persists structured analysis.
-- `report-agent`: renders incident reports and delivers them to Mattermost or Teams.
+## Architecture
+
+- `history-agent`: append-only alert ingestion, incident lookup, timeline search, dashboard metrics
+- `report-agent`: reads incident context from `history-agent` and writes only `report_generated` events
+- `supervisor-agent`: the only service allowed to change `incident.status`; it analyzes, acknowledges, resolves, and closes incidents
+- `postgres`: persistence for alerts, incidents, events, and AI settings
+- `nginx`: reverse proxy plus static UI hosting on `http://localhost:8080`
 
 ## Quick start
 
 ```bash
+cd "/mnt/d/sre ai/SRE-AI"
 cp .env.example .env
-docker compose up --build
+# edit .env for real secrets if needed
+
+docker compose up -d --build
 ```
 
-## Services
+## Service endpoints
 
-- `http://localhost:8001/health`
-- `http://localhost:8002/health`
-- `http://localhost:8003/health`
-- `http://localhost:8080`
+- `http://localhost:8001/health` - history-agent
+- `http://localhost:8002/health` - report-agent
+- `http://localhost:8003/health` - supervisor-agent
+- `http://localhost:8080` - UI through nginx
 
-## Notes
+## Repo layout
 
-- All components run in Docker; no local Python environment is required.
-- PostgreSQL schema is initialized from `infra/postgres/init.sql`.
-- If OpenRouter is unavailable, the supervisor falls back to a rule-based analysis with `confidence: 0.0`.
+- `infra/postgres/` - schema bootstrap and migrations
+- `shared/aiops_shared/` - shared DB, schema, HTTP, and utility modules
+- `services/history-agent/` - alert ingestion and incident views
+- `services/report-agent/` - report generation and report-event storage
+- `services/supervisor-agent/` - lifecycle decisions and AI settings
+- `services/nginx/` - reverse proxy and React/Vite SPA

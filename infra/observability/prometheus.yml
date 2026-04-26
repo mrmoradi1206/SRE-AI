@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'history-agent'
+    static_configs:
+      - targets: ['history-agent:8001']
+  - job_name: 'report-agent'
+    static_configs:
+      - targets: ['report-agent:8002']
+  - job_name: 'supervisor-agent'
+    static_configs:
+      - targets: ['supervisor-agent:8003']

@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  history-agent-green:
+    extends:
+      file: docker-compose.yml
+      service: history-agent
+    container_name: history-agent-green
+    ports:
+      - "18001:8001"
+
+  report-agent-green:
+    extends:
+      file: docker-compose.yml
+      service: report-agent
+    container_name: report-agent-green
+    ports:
+      - "18002:8002"
+
+  supervisor-agent-green:
+    extends:
+      file: docker-compose.yml
+      service: supervisor-agent
+    container_name: supervisor-agent-green
+    ports:
+      - "18003:8003"

@@ -1,212 +1,242 @@
-import logging
-from datetime import datetime, timezone
-from uuid import UUID
+from datetime import datetime, timedelta
+from uuid import UUID, uuid4
 
-from sqlalchemy import Select, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import desc, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from aiops_shared.fingerprint import generate_fingerprint
-from aiops_shared.models import Alert, Incident, IncidentAlert, TimelineEntry
-from aiops_shared.schemas import AlertPayload
+from aiops_shared.event_store import append_event
+from aiops_shared.fingerprint import compute_dedup_key, compute_fingerprint, compute_grouping_key, normalize_severity
+from aiops_shared.metrics import AGENT_ACTIONS, QUEUE_DEPTH
+from aiops_shared.models import Alert, AlertEvent, DeadLetterQueue, DeadLetterStatus, EventQueue, Incident, IncidentSeverity, IncidentStatus, QueueStatus
+from aiops_shared.projector import apply_event_to_projection
+from aiops_shared.queue import BackpressureExceededError, enqueue_job
+from aiops_shared.schemas import AlertIn
+from aiops_shared.utils import choose_higher_severity, utcnow
 
-logger = logging.getLogger(__name__)
+from .config import DEFAULT_ALERT_CONTEXT_HOURS, DEFAULT_SLA_HOURS, REOPEN_STALE_AFTER_HOURS
+
+ACTIVE_INCIDENTS = [IncidentStatus.OPEN, IncidentStatus.INVESTIGATING, IncidentStatus.MITIGATING]
 
 
-def _incident_title(labels: dict) -> str:
-    return f"{labels.get('alertname', 'Alert')} on {labels.get('instance', 'unknown')}"
-
-
-async def create_timeline_entry(
-    session: AsyncSession,
-    incident_id: UUID,
-    agent_name: str,
-    action: str,
-    status: str,
-    details: dict | None = None,
-    error_message: str | None = None,
-) -> None:
-    session.add(
-        TimelineEntry(
-            incident_id=incident_id,
-            agent_name=agent_name,
-            action=action,
-            status=status,
-            details=details,
-            error_message=error_message,
-        )
+def _payload_received_at(payload: AlertIn) -> datetime:
+    candidate = (
+        payload.payload.get('received_at')
+        or payload.payload.get('startsAt')
+        or payload.payload.get('starts_at')
+        or payload.payload.get('timestamp')
+        or payload.metadata.get('received_at')
     )
+    if isinstance(candidate, str):
+        try:
+            return datetime.fromisoformat(candidate.replace('Z', '+00:00'))
+        except ValueError:
+            return utcnow()
+    return candidate if isinstance(candidate, datetime) else utcnow()
 
 
-async def store_alert(session: AsyncSession, alert: AlertPayload) -> tuple[Alert, Incident, bool]:
-    fingerprint = generate_fingerprint(alert.labels)
-    status = alert.status
-    severity = alert.labels.get('severity', 'unknown')
-    now = datetime.now(timezone.utc)
+def should_reopen_incident(incident: Incident, *, observed_at: datetime, stale_after_hours: int) -> bool:
+    if incident.status not in {IncidentStatus.RESOLVED, IncidentStatus.CLOSED}:
+        return False
+    if incident.resolved_at is None:
+        return False
+    if observed_at <= incident.resolved_at:
+        return False
+    return observed_at <= incident.resolved_at + timedelta(hours=stale_after_hours)
 
-    stmt = insert(Alert).values(
-        fingerprint=fingerprint,
-        raw_payload=alert.model_dump(mode='json'),
-        labels=alert.labels,
-        annotations=alert.annotations or {},
-        severity=severity,
-        status=status,
-        received_at=now,
-        resolved_at=alert.endsAt if status == 'resolved' else None,
-    ).on_conflict_do_update(
-        index_elements=[Alert.fingerprint],
-        set_={
-            'raw_payload': alert.model_dump(mode='json'),
-            'labels': alert.labels,
-            'annotations': alert.annotations or {},
-            'severity': severity,
-            'status': status,
-            'received_at': now,
-            'resolved_at': alert.endsAt if status == 'resolved' else None,
-        },
-    ).returning(Alert)
-    stored_alert = (await session.execute(stmt)).scalar_one()
 
-    incident_result = await session.execute(select(Incident).where(Incident.fingerprint == fingerprint))
-    incident = incident_result.scalar_one_or_none()
-    is_new = incident is None
-    if incident is None:
+async def ingest_alert(
+    session: AsyncSession,
+    payload: AlertIn,
+    *,
+    correlation_id: UUID | None,
+    idempotency_key: str | None,
+    request_metadata: dict,
+) -> Alert:
+    fingerprint = compute_fingerprint(payload.payload)
+    grouping_key = payload.grouping_key or compute_grouping_key(payload.payload)
+    dedup_key = payload.dedup_key or compute_dedup_key(payload.payload)
+    severity = normalize_severity(payload.payload, fallback=payload.severity or 'unknown')
+    event_key = payload.event_key or f'{fingerprint}-{uuid4()}'
+    summary = payload.summary or payload.payload.get('summary') or payload.payload.get('message')
+    source = payload.source or payload.payload.get('source')
+    now = _payload_received_at(payload)
+
+    incident = (
+        await session.execute(
+            select(Incident)
+            .where(Incident.grouping_key == grouping_key)
+            .order_by(desc(Incident.last_seen_at))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    opened_event = None
+    if incident is None or should_reopen_incident(incident, observed_at=now, stale_after_hours=REOPEN_STALE_AFTER_HOURS):
         incident = Incident(
             fingerprint=fingerprint,
-            title=_incident_title(alert.labels),
-            severity=severity,
-            status='open' if status != 'resolved' else 'resolved',
-            resolved_at=alert.endsAt if status == 'resolved' else None,
+            grouping_key=grouping_key,
+            dedup_key=dedup_key,
+            summary=summary,
+            severity=IncidentSeverity(severity),
+            status=IncidentStatus.OPEN,
+            first_seen_at=now,
+            last_seen_at=now,
+            sla_deadline=now + timedelta(hours=DEFAULT_SLA_HOURS),
         )
         session.add(incident)
         await session.flush()
+        event_type = 'history.incident_reopened' if incident is not None and incident.id else 'history.incident_opened'
+        opened_event = await append_event(
+            session,
+            stream_id=incident.id,
+            event_type=event_type,
+            actor='history-agent',
+            correlation_id=correlation_id,
+            payload={
+                'fingerprint': fingerprint,
+                'grouping_key': grouping_key,
+                'dedup_key': dedup_key,
+                'summary': summary,
+                'severity': severity,
+                'initial_state': IncidentStatus.OPEN.value,
+                'sla_deadline': incident.sla_deadline.isoformat() if incident.sla_deadline else None,
+            },
+            metadata=request_metadata,
+        )
+        await apply_event_to_projection(session, incident, opened_event)
     else:
-        incident.severity = severity
-        if status == 'resolved':
-            incident.status = 'resolved'
-            incident.resolved_at = alert.endsAt or now
-        elif incident.status == 'resolved':
-            incident.status = 'open'
-            incident.resolved_at = None
+        incident.last_seen_at = now
+        incident.summary = summary or incident.summary
+        incident.fingerprint = fingerprint
+        incident.dedup_key = dedup_key
+        incident.severity = IncidentSeverity(choose_higher_severity(incident.severity.value, severity))
+        incident.source_count += 1
 
-    link_stmt = insert(IncidentAlert).values(incident_id=incident.id, alert_id=stored_alert.id).on_conflict_do_nothing()
-    await session.execute(link_stmt)
-    await create_timeline_entry(
-        session,
-        incident.id,
-        'history-agent',
-        'alert_ingested',
-        'success',
-        {'fingerprint': fingerprint, 'status': status},
+    alert = Alert(
+        incident_id=incident.id,
+        fingerprint=fingerprint,
+        grouping_key=grouping_key,
+        dedup_key=dedup_key,
+        event_key=event_key,
+        source=source,
+        severity=severity,
+        correlation_id=correlation_id,
+        payload=payload.payload,
     )
-    await session.commit()
-    await session.refresh(incident)
-    return stored_alert, incident, is_new
+    session.add(alert)
+    await session.flush()
+    session.add(
+        AlertEvent(
+            alert_id=alert.id,
+            version=1,
+            event_type='ingested',
+            payload=payload.payload,
+        )
+    )
 
-
-async def fetch_incident_context(session: AsyncSession, fingerprint: str, hours: int) -> dict | None:
-    incident = (await session.execute(select(Incident).where(Incident.fingerprint == fingerprint))).scalar_one_or_none()
-    if incident is None:
-        return None
-
-    alerts = (await session.execute(
-        select(Alert).where(Alert.fingerprint == fingerprint).order_by(Alert.received_at.desc())
-    )).scalars().all()
-    timeline = (await session.execute(
-        select(TimelineEntry).where(TimelineEntry.incident_id == incident.id).order_by(TimelineEntry.created_at.desc())
-    )).scalars().all()
-
-    def dump_alert(row: Alert) -> dict:
-        return {
-            'id': str(row.id),
-            'fingerprint': row.fingerprint,
-            'labels': row.labels,
-            'annotations': row.annotations,
-            'severity': row.severity,
-            'status': row.status,
-            'received_at': row.received_at.isoformat() if row.received_at else None,
-            'resolved_at': row.resolved_at.isoformat() if row.resolved_at else None,
-        }
-
-    return {
-        'incident': {
-            'id': str(incident.id),
-            'fingerprint': incident.fingerprint,
-            'title': incident.title,
-            'severity': incident.severity,
-            'status': incident.status,
-            'root_cause': incident.root_cause,
-            'business_impact': incident.business_impact,
-            'diagnosis': incident.diagnosis,
-            'recommendations': incident.recommendations,
-            'created_at': incident.created_at.isoformat() if incident.created_at else None,
-            'updated_at': incident.updated_at.isoformat() if incident.updated_at else None,
+    attached_event = await append_event(
+        session,
+        stream_id=incident.id,
+        event_type='history.alert_attached',
+        actor='history-agent',
+        correlation_id=correlation_id,
+        idempotency_key=idempotency_key,
+        causation_id=opened_event.event_id if opened_event else None,
+        payload={
+            'alert_id': str(alert.id),
+            'event_key': alert.event_key,
+            'fingerprint': fingerprint,
+            'grouping_key': grouping_key,
+            'dedup_key': dedup_key,
+            'severity': severity,
+            'summary': summary,
         },
-        'current_alert': dump_alert(alerts[0]) if alerts else None,
-        'historical_alerts': [dump_alert(item) for item in alerts[:hours]] if alerts else [],
-        'timeline': [
-            {
-                'agent_name': item.agent_name,
-                'action': item.action,
-                'status': item.status,
-                'details': item.details,
-                'error_message': item.error_message,
-                'created_at': item.created_at.isoformat() if item.created_at else None,
-            }
-            for item in timeline
-        ],
+        metadata=request_metadata,
+    )
+    await apply_event_to_projection(session, incident, attached_event)
+
+    try:
+        await enqueue_job(
+            session,
+            topic='supervisor.analyze',
+            payload={'incident_id': str(incident.id), 'reasoning_mode': 'balanced'},
+            stream_id=incident.id,
+            correlation_id=correlation_id,
+            idempotency_key=f'analyze:{incident.id}:{attached_event.sequence_number}',
+        )
+    except BackpressureExceededError:
+        pass
+    AGENT_ACTIONS.labels('history-agent', 'alert_ingested').inc()
+    pending = await session.scalar(select(func.count()).select_from(EventQueue).where(EventQueue.status.in_([QueueStatus.PENDING, QueueStatus.RETRYING])))
+    QUEUE_DEPTH.labels('supervisor.analyze').set(int(pending or 0))
+    return alert
+
+
+async def ingest_alert_batch(
+    session: AsyncSession,
+    alerts: list[AlertIn],
+    *,
+    correlation_id: UUID | None,
+    idempotency_key: str | None,
+    request_metadata: dict,
+) -> list[Alert]:
+    results: list[Alert] = []
+    for index, alert in enumerate(alerts):
+        derived_idempotency = f'{idempotency_key}:{index}' if idempotency_key else None
+        results.append(
+            await ingest_alert(
+                session,
+                alert,
+                correlation_id=correlation_id or alert.correlation_id,
+                idempotency_key=derived_idempotency,
+                request_metadata=request_metadata | alert.metadata,
+            )
+        )
+    return results
+
+
+async def recent_alerts_summary(session: AsyncSession, *, hours: int = DEFAULT_ALERT_CONTEXT_HOURS, limit: int = 20) -> list[Alert]:
+    cutoff = utcnow() - timedelta(hours=hours)
+    query = (
+        select(Alert)
+        .where(Alert.created_at >= cutoff)
+        .order_by(Alert.created_at.desc())
+        .limit(limit)
+    )
+    return (await session.execute(query)).scalars().all()
+
+
+async def dashboard_counts(session: AsyncSession) -> dict:
+    since = utcnow().replace(microsecond=0) - timedelta(hours=24)
+    open_count = await session.scalar(select(func.count()).select_from(Incident).where(Incident.status == IncidentStatus.OPEN))
+    investigating_count = await session.scalar(select(func.count()).select_from(Incident).where(Incident.status == IncidentStatus.INVESTIGATING))
+    mitigating_count = await session.scalar(select(func.count()).select_from(Incident).where(Incident.status == IncidentStatus.MITIGATING))
+    alerts_last_24h = await session.scalar(select(func.count()).select_from(Alert).where(Alert.created_at >= since))
+    resolved_last_24h = await session.scalar(
+        select(func.count()).select_from(Incident).where(Incident.status == IncidentStatus.RESOLVED, Incident.resolved_at >= since)
+    )
+    dlq_pending_count = await session.scalar(
+        select(func.count()).select_from(DeadLetterQueue).where(DeadLetterQueue.status.in_([DeadLetterStatus.PENDING, DeadLetterStatus.RETRYING]))
+    )
+    queue_pending_count = await session.scalar(
+        select(func.count()).select_from(EventQueue).where(EventQueue.status.in_([QueueStatus.PENDING, QueueStatus.RETRYING]))
+    )
+    return {
+        'open_incidents_count': int(open_count or 0),
+        'investigating_incidents_count': int(investigating_count or 0),
+        'mitigating_incidents_count': int(mitigating_count or 0),
+        'alerts_last_24h': int(alerts_last_24h or 0),
+        'resolved_last_24h': int(resolved_last_24h or 0),
+        'dlq_pending_count': int(dlq_pending_count or 0),
+        'queue_pending_count': int(queue_pending_count or 0),
     }
 
 
-async def fetch_incidents(session: AsyncSession) -> list[dict]:
-    incidents = (await session.execute(select(Incident).order_by(Incident.created_at.desc()))).scalars().all()
-    return [
-        {
-            'id': str(item.id),
-            'fingerprint': item.fingerprint,
-            'title': item.title,
-            'severity': item.severity,
-            'status': item.status,
-            'created_at': item.created_at.isoformat() if item.created_at else None,
-            'updated_at': item.updated_at.isoformat() if item.updated_at else None,
-        }
-        for item in incidents
-    ]
-
-
-async def fetch_timeline(session: AsyncSession, incident_id: UUID) -> list[dict]:
-    entries = (await session.execute(
-        select(TimelineEntry).where(TimelineEntry.incident_id == incident_id).order_by(TimelineEntry.created_at.desc())
-    )).scalars().all()
-    return [
-        {
-            'id': item.id,
-            'agent_name': item.agent_name,
-            'action': item.action,
-            'status': item.status,
-            'details': item.details,
-            'error_message': item.error_message,
-            'created_at': item.created_at.isoformat() if item.created_at else None,
-        }
-        for item in entries
-    ]
-
-
-async def update_incident_analysis(session: AsyncSession, incident_id: UUID, analysis: dict) -> None:
-    incident = (await session.execute(select(Incident).where(Incident.id == incident_id))).scalar_one()
-    incident.root_cause = analysis.get('root_cause')
-    incident.diagnosis = analysis.get('diagnosis')
-    incident.business_impact = analysis.get('business_impact')
-    incident.recommendations = analysis.get('recommendations', [])
-    incident.analysis_confidence = analysis.get('confidence')
-    incident.severity = analysis.get('severity', incident.severity)
-    incident.status = 'analyzing'
-    await create_timeline_entry(session, incident_id, 'supervisor-agent', 'analysis_saved', 'success', analysis)
-    await session.commit()
-
-
-async def update_incident_status(session: AsyncSession, incident_id: UUID, status: str) -> None:
-    incident = (await session.execute(select(Incident).where(Incident.id == incident_id))).scalar_one()
-    incident.status = status
-    await create_timeline_entry(session, incident_id, 'report-agent', 'incident_status_updated', 'success', {'status': status})
-    await session.commit()
+def translate_integrity_error(exc: IntegrityError) -> str:
+    raw = str(exc.orig)
+    if 'event_key' in raw:
+        return 'duplicate event_key'
+    if 'idempotency_key' in raw:
+        return 'duplicate idempotency_key'
+    return 'failed to ingest alert'

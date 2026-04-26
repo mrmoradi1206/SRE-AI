@@ -1,7 +1,8 @@
 import os
 
 SERVICE_NAME = 'history-agent'
-SUPERVISOR_AGENT_URL = os.getenv('SUPERVISOR_AGENT_URL', 'http://supervisor-agent:8002')
-HTTP_MAX_RETRIES = int(os.getenv('HTTP_MAX_RETRIES', '3'))
-HTTP_BASE_DELAY = float(os.getenv('HTTP_BASE_DELAY', '1.0'))
-HTTP_TIMEOUT = float(os.getenv('HTTP_TIMEOUT', '30.0'))
+MAX_PAGE_SIZE = min(int(os.getenv('MAX_PAGE_SIZE', '200')), 200)
+DEFAULT_PAGE_SIZE = min(int(os.getenv('DEFAULT_PAGE_SIZE', '50')), 200)
+DEFAULT_SLA_HOURS = int(os.getenv('DEFAULT_SLA_HOURS', '4'))
+REOPEN_STALE_AFTER_HOURS = int(os.getenv('REOPEN_STALE_AFTER_HOURS', '24'))
+DEFAULT_ALERT_CONTEXT_HOURS = int(os.getenv('DEFAULT_ALERT_CONTEXT_HOURS', '24'))
