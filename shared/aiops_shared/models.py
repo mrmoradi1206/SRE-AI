@@ -134,8 +134,8 @@ class IncidentEvent(Base):
     causation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     correlation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
     idempotency_key: Mapped[str | None] = mapped_column(Text, unique=True)
-    metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    event_metadata: Mapped[dict] = mapped_column('metadata', JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     sequence_number: Mapped[int] = mapped_column(BigInteger, nullable=False)
 

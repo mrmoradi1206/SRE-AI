@@ -37,7 +37,7 @@ async def append_event(
         correlation_id=correlation_id,
         idempotency_key=idempotency_key,
         payload=payload,
-        metadata=metadata or {},
+        event_metadata=metadata or {},
     )
     session.add(event)
     await session.flush()

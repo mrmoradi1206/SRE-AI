@@ -67,7 +67,27 @@ class EventEnvelopeOut(BaseModel):
     created_at: datetime
     sequence_number: int
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    @model_validator(mode='before')
+    @classmethod
+    def normalize_event_metadata(cls, value: Any) -> Any:
+        if hasattr(value, 'event_metadata') and not hasattr(value, 'metadata'):
+            return {
+                'event_id': value.event_id,
+                'stream_id': value.stream_id,
+                'event_version': value.event_version,
+                'event_type': value.event_type,
+                'actor': value.actor,
+                'causation_id': value.causation_id,
+                'correlation_id': value.correlation_id,
+                'idempotency_key': value.idempotency_key,
+                'metadata': value.event_metadata,
+                'payload': value.payload,
+                'created_at': value.created_at,
+                'sequence_number': value.sequence_number,
+            }
+        return value
 
 
 class AlertOut(BaseModel):

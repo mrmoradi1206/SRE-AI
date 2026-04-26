@@ -51,7 +51,7 @@ def _coerce_ts(value: Any, default: datetime | None) -> Any:
 
 def apply_event_to_state(state: IncidentProjectionState, event: IncidentEvent) -> IncidentProjectionState:
     payload = event.payload or {}
-    metadata = event.metadata or {}
+    metadata = event.event_metadata or {}
     state.projection_version = event.sequence_number
 
     if event.event_type == 'history.incident_opened':
