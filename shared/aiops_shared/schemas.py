@@ -101,7 +101,7 @@ class EventEnvelopeOut(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def normalize_event_metadata(cls, value: Any) -> Any:
-        if hasattr(value, 'event_metadata') and not hasattr(value, 'metadata'):
+        if hasattr(value, 'event_metadata'):
             return {
                 'event_id': value.event_id,
                 'stream_id': value.stream_id,

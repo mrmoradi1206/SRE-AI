@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS incident_events (
     causation_id UUID,
     correlation_id UUID,
     idempotency_key TEXT UNIQUE,
-    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    event_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     sequence_number BIGINT NOT NULL,
