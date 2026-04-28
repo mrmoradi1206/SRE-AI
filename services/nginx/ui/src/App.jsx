@@ -26,6 +26,18 @@ const SAMPLE_ALERT = {
     description: 'p95 latency has exceeded 2s for 10 minutes.',
   },
 };
+const NAV_ITEMS = [
+  { to: '/', label: 'Dashboard', hint: 'Command overview' },
+  { to: '/incidents', label: 'Incidents', hint: 'Triage queue' },
+  { to: '/workflow', label: 'Test Workflow', hint: 'End-to-end drill' },
+  { to: '/agents', label: 'Agents', hint: 'Service readiness' },
+  { to: '/settings', label: 'LLM Settings', hint: 'Model routing' },
+];
+const OPS_SIGNALS = [
+  ['99.95%', 'target SLO'],
+  ['< 4h', 'default SLA'],
+  ['3', 'AI agents'],
+];
 
 async function apiFetch(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -46,6 +58,21 @@ function StatusChip({ status }) {
 
 function providerLabel(provider) {
   return PROVIDER_LABELS[provider] || provider;
+}
+
+function formatDate(value) {
+  if (!value) return 'not available';
+  return new Date(value).toLocaleString();
+}
+
+function EmptyState({ title, copy }) {
+  return (
+    <div className="empty-state">
+      <span aria-hidden="true">+</span>
+      <strong>{title}</strong>
+      <p>{copy}</p>
+    </div>
+  );
 }
 
 function JsonBlock({ data, title = 'JSON' }) {
@@ -100,18 +127,29 @@ function Shell({ children }) {
   return (
     <div className="shell">
       <aside className="sidebar">
-        <div>
-          <p className="eyebrow">SRE-AI</p>
-          <h1>Control Room</h1>
-          <p className="sidebar-copy">History keeps the append-only signal, supervisor manages lifecycle, report builds operator context.</p>
+        <div className="brand-card">
+          <div className="brand-mark">SA</div>
+          <div>
+            <p className="eyebrow">SRE-AI</p>
+            <h1>Control Room</h1>
+          </div>
+          <p className="sidebar-copy">A production-minded command surface for alert history, AI-assisted triage, and operator reporting.</p>
         </div>
-        <nav>
-          <NavLink to="/">Dashboard</NavLink>
-          <NavLink to="/incidents">Incidents</NavLink>
-          <NavLink to="/workflow">Test Workflow</NavLink>
-          <NavLink to="/agents">Agents</NavLink>
-          <NavLink to="/settings">LLM Settings</NavLink>
+        <nav aria-label="Primary navigation">
+          {NAV_ITEMS.map((item) => (
+            <NavLink key={item.to} to={item.to} end={item.to === '/'}>
+              <span>{item.label}</span>
+              <small>{item.hint}</small>
+            </NavLink>
+          ))}
         </nav>
+        <div className="sidebar-status">
+          <span className="live-dot" />
+          <div>
+            <strong>Live operations</strong>
+            <p>History, supervisor, and reports routed through nginx</p>
+          </div>
+        </div>
       </aside>
       <main className="content">
         <header className="topbar">
@@ -119,10 +157,12 @@ function Shell({ children }) {
             <p className="eyebrow">Operational overview</p>
             <h2>AIOps incident dashboard</h2>
           </div>
-          <span className="topbar-note">Searchable timeline, safe pagination, provider-aware AI actions</span>
-          <button type="button" className="ghost-button" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
-            {theme === 'light' ? 'Dark mode' : 'Light mode'}
-          </button>
+          <div className="topbar-actions">
+            <span className="topbar-note">Searchable timelines, safe pagination, provider-aware AI actions</span>
+            <button type="button" className="ghost-button" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
+              {theme === 'light' ? 'Dark mode' : 'Light mode'}
+            </button>
+          </div>
         </header>
         {children}
       </main>
@@ -130,12 +170,11 @@ function Shell({ children }) {
   );
 }
 
-function MetricCard({ title, value, subtitle }) {
+function MetricCard({ title, value, subtitle, tone = 'neutral' }) {
   return (
-    <div className="metric-card panel">
-      <p className="eyebrow">Metric</p>
+    <div className={`metric-card panel tone-${tone}`}>
+      <p className="eyebrow">{title}</p>
       <h3>{value}</h3>
-      <p>{title}</p>
       {subtitle ? <small>{subtitle}</small> : null}
     </div>
   );
@@ -164,21 +203,34 @@ function DashboardPage() {
   return (
     <section className="page-grid">
       <div className="hero-card span-2">
-        <p className="eyebrow">System pulse</p>
-        <h3>Recent signal and incident posture</h3>
-        <p>
-          The dashboard surfaces append-only alert history, current lifecycle state, and recent alert activity without
-          unbounded queries.
-        </p>
+        <div className="hero-copy">
+          <p className="eyebrow">System pulse</p>
+          <h3>Recent signal and incident posture</h3>
+          <p>
+            The dashboard surfaces append-only alert history, current lifecycle state, and recent alert activity without
+            unbounded queries.
+          </p>
+        </div>
+        <div className="ops-strip">
+          {OPS_SIGNALS.map(([value, label]) => (
+            <span key={label}>
+              <strong>{value}</strong>
+              <small>{label}</small>
+            </span>
+          ))}
+        </div>
       </div>
-      <MetricCard title="Open incidents" value={stats?.open_incidents_count ?? '--'} />
-      <MetricCard title="Investigating" value={stats?.investigating_incidents_count ?? '--'} />
-      <MetricCard title="Mitigating" value={stats?.mitigating_incidents_count ?? '--'} />
-      <MetricCard title="Resolved in 24h" value={stats?.resolved_last_24h ?? '--'} />
+      <MetricCard title="Open incidents" value={stats?.open_incidents_count ?? '--'} subtitle="Active operator attention" tone="warning" />
+      <MetricCard title="Investigating" value={stats?.investigating_incidents_count ?? '--'} subtitle="Supervisor-assisted triage" tone="info" />
+      <MetricCard title="Mitigating" value={stats?.mitigating_incidents_count ?? '--'} subtitle="Remediation in progress" tone="accent" />
+      <MetricCard title="Resolved in 24h" value={stats?.resolved_last_24h ?? '--'} subtitle="Closed-loop outcomes" tone="success" />
 
       <div className="panel">
         <div className="panel-header">
-          <h3>Recent incidents</h3>
+          <div>
+            <p className="eyebrow">Queue</p>
+            <h3>Recent incidents</h3>
+          </div>
           <Link to="/incidents">See all</Link>
         </div>
         {error ? <p className="error-text">{error}</p> : null}
@@ -187,7 +239,7 @@ function DashboardPage() {
             <Link key={incident.id} className="incident-row" to={`/incidents/${incident.id}`}>
               <div>
                 <strong>{incident.summary || incident.fingerprint.slice(0, 14)}</strong>
-                <p>{new Date(incident.last_seen_at).toLocaleString()}</p>
+                <p>{formatDate(incident.last_seen_at)}</p>
               </div>
               <div className="incident-meta">
                 <SeverityChip severity={incident.severity} />
@@ -195,12 +247,16 @@ function DashboardPage() {
               </div>
             </Link>
           ))}
+          {!incidents.length && !error ? <EmptyState title="No incidents yet" copy="Ingest an alert or run the test workflow to populate this queue." /> : null}
         </div>
       </div>
 
       <div className="panel">
         <div className="panel-header">
-          <h3>Recent alerts</h3>
+          <div>
+            <p className="eyebrow">Signal</p>
+            <h3>Recent alerts</h3>
+          </div>
           <span>24h summary</span>
         </div>
         <div className="stack-list">
@@ -211,9 +267,10 @@ function DashboardPage() {
                 <span>{alert.source || 'unknown source'}</span>
               </div>
               <strong>{alert.event_key}</strong>
-              <p>{new Date(alert.created_at).toLocaleString()}</p>
+              <p>{formatDate(alert.created_at)}</p>
             </article>
           ))}
+          {!recentAlerts.length && !error ? <EmptyState title="Quiet window" copy="No alerts returned for the last 24 hours." /> : null}
         </div>
       </div>
     </section>
@@ -242,8 +299,11 @@ function IncidentsPage() {
   return (
     <section className="panel">
       <div className="panel-header">
-        <h3>Incidents</h3>
-        <span>{data.total} total</span>
+        <div>
+          <p className="eyebrow">Triage queue</p>
+          <h3>Incidents</h3>
+        </div>
+        <span className="count-pill">{data.total} total</span>
       </div>
       <div className="toolbar">
         <input
@@ -279,7 +339,7 @@ function IncidentsPage() {
           <Link key={incident.id} className="incident-row" to={`/incidents/${incident.id}`}>
             <div>
               <strong>{incident.summary || incident.fingerprint}</strong>
-              <p>{incident.grouping_key.slice(0, 18)}…</p>
+              <p>{incident.grouping_key.slice(0, 18)}... last seen {formatDate(incident.last_seen_at)}</p>
             </div>
             <div className="incident-meta">
               <span>{incident.alert_count} alerts</span>
@@ -288,6 +348,7 @@ function IncidentsPage() {
             </div>
           </Link>
         ))}
+        {!data.items.length && !error ? <EmptyState title="No matching incidents" copy="Adjust the filters or generate a sample alert from the workflow page." /> : null}
       </div>
     </section>
   );
@@ -364,9 +425,9 @@ function IncidentDetailPage() {
         <div className="detail-meta-grid">
           <div><strong>Fingerprint</strong><p>{incident.fingerprint}</p></div>
           <div><strong>Grouping key</strong><p>{incident.grouping_key}</p></div>
-          <div><strong>First seen</strong><p>{new Date(incident.first_seen_at).toLocaleString()}</p></div>
-          <div><strong>Last seen</strong><p>{new Date(incident.last_seen_at).toLocaleString()}</p></div>
-          <div><strong>SLA deadline</strong><p>{incident.sla_deadline ? new Date(incident.sla_deadline).toLocaleString() : 'n/a'}</p></div>
+          <div><strong>First seen</strong><p>{formatDate(incident.first_seen_at)}</p></div>
+          <div><strong>Last seen</strong><p>{formatDate(incident.last_seen_at)}</p></div>
+          <div><strong>SLA deadline</strong><p>{incident.sla_deadline ? formatDate(incident.sla_deadline) : 'n/a'}</p></div>
           <div><strong>MTTR</strong><p>{incident.mttr_seconds ?? 'n/a'}s</p></div>
         </div>
         <div className="action-row wrap">
@@ -394,10 +455,11 @@ function IncidentDetailPage() {
                 <span>{alert.source || 'unknown source'}</span>
               </div>
               <strong>{alert.event_key}</strong>
-              <p>{new Date(alert.created_at).toLocaleString()}</p>
+              <p>{formatDate(alert.created_at)}</p>
               <pre>{JSON.stringify(alert.payload, null, 2)}</pre>
             </article>
           ))}
+          {!incident.alerts.length ? <EmptyState title="No alert samples loaded" copy="This incident detail request returned no alert payloads." /> : null}
         </div>
       </div>
 
@@ -427,11 +489,12 @@ function IncidentDetailPage() {
               <div className="timeline-meta">
                 <strong>{event.event_type}</strong>
                 <span>{event.actor}</span>
-                <span>{new Date(event.created_at).toLocaleString()}</span>
+                <span>{formatDate(event.created_at)}</span>
               </div>
               <pre>{JSON.stringify({ metadata: event.metadata, payload: event.payload }, null, 2)}</pre>
             </article>
           ))}
+          {!incident.timeline.length ? <EmptyState title="No timeline events" copy="No event stream entries are available for this incident." /> : null}
         </div>
       </div>
 
@@ -470,15 +533,20 @@ function WorkflowTestPage() {
   return (
     <section className="page-grid">
       <div className="hero-card span-2">
-        <p className="eyebrow">Guided simulation</p>
-        <h3>Run Alert → History → Supervisor → Report</h3>
-        <p>Paste a raw alert payload, run the full workflow, and review sanitized LLM traces plus intermediate node output.</p>
+        <div className="hero-copy">
+          <p className="eyebrow">Guided simulation</p>
+          <h3>Run Alert - History - Supervisor - Report</h3>
+          <p>Paste a raw alert payload, run the full workflow, and review sanitized LLM traces plus intermediate node output.</p>
+        </div>
         <WorkflowRail trace={result?.trace || []} />
       </div>
 
       <div className="panel">
         <div className="panel-header">
-          <h3>Raw alert JSON</h3>
+          <div>
+            <p className="eyebrow">Input</p>
+            <h3>Raw alert JSON</h3>
+          </div>
           <button type="button" className="ghost-button" onClick={() => setRawAlert(JSON.stringify(SAMPLE_ALERT, null, 2))}>Reset sample</button>
         </div>
         <textarea className="json-input" value={rawAlert} onChange={(event) => setRawAlert(event.target.value)} />
@@ -490,7 +558,10 @@ function WorkflowTestPage() {
 
       <div className="panel">
         <div className="panel-header">
-          <h3>Workflow result</h3>
+          <div>
+            <p className="eyebrow">Trace</p>
+            <h3>Workflow result</h3>
+          </div>
           <StatusChip status={result?.status || 'pending'} />
         </div>
         {result ? (
@@ -501,13 +572,16 @@ function WorkflowTestPage() {
             <JsonBlock title="Final report" data={result.report || {}} />
           </div>
         ) : (
-          <p>Run a test alert to see the full structured trace.</p>
+          <EmptyState title="Awaiting workflow" copy="Run a test alert to see the full structured trace." />
         )}
       </div>
 
       <div className="panel span-2">
         <div className="panel-header">
-          <h3>Node system prompts</h3>
+          <div>
+            <p className="eyebrow">Agent contract</p>
+            <h3>Node system prompts</h3>
+          </div>
           <span>Provider-agnostic behavior</span>
         </div>
         <div className="prompt-grid">
@@ -534,12 +608,20 @@ function AgentsPage() {
   }, []);
 
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <h3>Agent health</h3>
+    <section className="page-grid">
+      <div className="hero-card span-2">
+        <div className="hero-copy">
+          <p className="eyebrow">Fleet readiness</p>
+          <h3>Agent health</h3>
+          <p>Every agent exposes health and readiness endpoints through the nginx API facade for quick operator verification.</p>
+        </div>
+        <div className="ops-strip">
+          <span><strong>{health.length || '--'}</strong><small>responses</small></span>
+          <span><strong>{error ? 'degraded' : 'normal'}</strong><small>view state</small></span>
+        </div>
       </div>
       {error ? <p className="error-text">{error}</p> : null}
-      <div className="health-grid">
+      <div className="health-grid span-2">
         {health.map((item) => (
           <article key={item.service} className="health-card">
             <p className="eyebrow">{item.service}</p>
@@ -549,6 +631,7 @@ function AgentsPage() {
             <p>{item.timestamp}</p>
           </article>
         ))}
+        {!health.length && !error ? <EmptyState title="Loading health checks" copy="Waiting for history, supervisor, and report endpoints." /> : null}
       </div>
     </section>
   );
@@ -648,9 +731,11 @@ function SettingsPage() {
   return (
     <section className="page-grid">
       <div className="hero-card span-2">
-        <p className="eyebrow">LLM Settings</p>
-        <h3>Live model routing per agent</h3>
-        <p>Switch providers and models without rebuilding containers. The backend reloads this file-backed config on each LLM call.</p>
+        <div className="hero-copy">
+          <p className="eyebrow">LLM Settings</p>
+          <h3>Live model routing per agent</h3>
+          <p>Switch providers and models without rebuilding containers. The backend reloads this file-backed config on each LLM call.</p>
+        </div>
         <div className="provider-strip">
           {draft.providers.map((provider) => <span key={provider}>{providerLabel(provider)}</span>)}
         </div>
@@ -717,7 +802,7 @@ function SettingsPage() {
               <label key={provider}>
                 {providerLabel(provider)} API key
                 <span className="field-hint">
-                  {envName} · {status.env_configured || status.configured ? 'configured' : 'not configured'}
+                  {envName} - {status.env_configured || status.configured ? 'configured' : 'not configured'}
                 </span>
                 <input
                   type="password"
