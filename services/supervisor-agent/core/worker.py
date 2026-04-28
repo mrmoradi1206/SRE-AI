@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 
 from aiops_shared.database import get_session_factory
 from aiops_shared.dlq import enqueue_dead_letter
+from aiops_shared.dlq_worker import run_dlq_worker
 from aiops_shared.metrics import AGENT_ACTIONS, QUEUE_DEPTH
 from aiops_shared.models import EventQueue, Incident, QueueStatus
 from aiops_shared.queue import claim_next_job, mark_job_complete, retry_job
@@ -75,3 +76,7 @@ async def run_retry_worker(stop_event: asyncio.Event) -> None:
             pending = await session.scalar(select(func.count()).select_from(EventQueue).where(EventQueue.status.in_([QueueStatus.PENDING, QueueStatus.RETRYING])))
             QUEUE_DEPTH.labels('supervisor.analyze').set(int(pending or 0))
         await asyncio.sleep(5.0)
+
+
+async def run_supervisor_dlq_worker(stop_event: asyncio.Event) -> None:
+    await run_dlq_worker(stop_event, service=SERVICE_NAME)

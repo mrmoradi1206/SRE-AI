@@ -1,13 +1,24 @@
+import logging
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import IncidentEvent
 
+logger = logging.getLogger(__name__)
+
+
+def _advisory_lock_id(stream_id: UUID) -> int:
+    # PostgreSQL advisory locks are 64-bit signed integers.
+    # Derive a stable int from the UUID bytes so all sessions agree on the lock key.
+    return int.from_bytes(stream_id.bytes[:8], byteorder='big', signed=True)
+
 
 async def next_sequence_number(session: AsyncSession, stream_id: UUID) -> int:
+    lock_id = _advisory_lock_id(stream_id)
+    await session.execute(text('SELECT pg_advisory_xact_lock(:lock_id)').bindparams(lock_id=lock_id))
     max_sequence = await session.scalar(
         select(func.max(IncidentEvent.sequence_number)).where(IncidentEvent.stream_id == stream_id)
     )

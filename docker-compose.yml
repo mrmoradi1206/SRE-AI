@@ -1,5 +1,12 @@
 version: "3.9"
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+    labels: "service_name"
+
 x-agent-env: &agent-env
   DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_PORT:-5432}/${POSTGRES_DB}
   POSTGRES_DB: ${POSTGRES_DB}
@@ -63,6 +70,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging: *default-logging
     networks:
       - sre-ai
 
@@ -89,6 +105,15 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    logging: *default-logging
     networks:
       - sre-ai
 
@@ -117,6 +142,15 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    logging: *default-logging
     networks:
       - sre-ai
 
@@ -147,6 +181,15 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    logging: *default-logging
     networks:
       - sre-ai
 
@@ -171,6 +214,15 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    logging: *default-logging
     networks:
       - sre-ai
 
@@ -186,24 +238,50 @@ services:
         condition: service_healthy
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+      - "--storage.tsdb.retention.size=2GB"
     volumes:
       - ./infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+    logging: *default-logging
     networks:
       - sre-ai
 
   jaeger:
     image: jaegertracing/all-in-one:1.58
     restart: unless-stopped
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
     ports:
       - "${JAEGER_UI_PORT:-16686}:16686"
       - "${JAEGER_AGENT_PORT:-6831}:6831/udp"
+      - "4317:4317"
+      - "4318:4318"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+    logging: *default-logging
     networks:
       - sre-ai
 
 volumes:
   postgres_data:
+  prometheus_data:
 
 networks:
   sre-ai:

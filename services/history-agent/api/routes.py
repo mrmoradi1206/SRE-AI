@@ -16,7 +16,7 @@ from aiops_shared.schemas import AlertBatchIn, AlertIn, AlertOut, DashboardStats
 from aiops_shared.utils import clamp_page_size, health_payload
 
 from core.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, SERVICE_NAME
-from core.search import apply_incident_filters, build_incident_detail
+from core.search import apply_incident_filters, build_incident_detail, list_incidents_with_aggregates
 from core.storage import dashboard_counts, ingest_alert, ingest_alert_batch, recent_alerts_summary, translate_integrity_error
 
 router = APIRouter()
@@ -123,22 +123,23 @@ async def list_incidents(
     safe_page_size = clamp_page_size(page_size, default=DEFAULT_PAGE_SIZE, maximum=MAX_PAGE_SIZE)
     offset = (page - 1) * safe_page_size
 
-    base_stmt = apply_incident_filters(select(Incident), status, fingerprint, created_from, created_to, query=query)
     total_stmt = apply_incident_filters(select(func.count()).select_from(Incident), status, fingerprint, created_from, created_to, query=query)
     total = int((await session.scalar(total_stmt)) or 0)
-    incidents = (await session.execute(base_stmt.order_by(Incident.last_seen_at.desc()).offset(offset).limit(safe_page_size))).scalars().all()
+
+    incidents, aggregates = await list_incidents_with_aggregates(
+        session,
+        status=status,
+        fingerprint=fingerprint,
+        created_from=created_from,
+        created_to=created_to,
+        query=query,
+        offset=offset,
+        limit=safe_page_size,
+    )
 
     items = []
     for incident in incidents:
-        alert_count = int((await session.scalar(select(func.count()).select_from(Alert).where(Alert.incident_id == incident.id))) or 0)
-        latest_event_type = (
-            await session.execute(
-                select(IncidentEvent.event_type)
-                .where(IncidentEvent.stream_id == incident.id)
-                .order_by(IncidentEvent.sequence_number.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
+        agg = aggregates.get(incident.id, {})
         items.append(
             IncidentListItem(
                 id=incident.id,
@@ -155,8 +156,8 @@ async def list_incidents(
                 sla_violated=incident.sla_violated,
                 created_at=incident.created_at,
                 updated_at=incident.updated_at,
-                alert_count=alert_count,
-                latest_event_type=latest_event_type,
+                alert_count=agg.get('alert_count', 0),
+                latest_event_type=agg.get('latest_event_type'),
                 mttr_seconds=incident.mttr_seconds,
                 projection_version=incident.projection_version,
             ).model_dump(mode='json')
