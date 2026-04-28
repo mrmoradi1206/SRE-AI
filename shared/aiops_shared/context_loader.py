@@ -7,6 +7,24 @@ from .models import Alert, Incident, IncidentEvent
 from .schemas import AlertOut, EventEnvelopeOut
 
 
+INCIDENT_COLLECTION_KEYS = {'alerts', 'timeline'}
+
+
+def normalize_incident_bundle(bundle: dict) -> dict:
+    if 'incident' in bundle and isinstance(bundle.get('incident'), dict):
+        return {
+            'incident': bundle['incident'],
+            'alerts': bundle.get('alerts', []),
+            'timeline': bundle.get('timeline', []),
+        }
+    incident = {key: value for key, value in bundle.items() if key not in INCIDENT_COLLECTION_KEYS}
+    return {
+        'incident': incident,
+        'alerts': bundle.get('alerts', []),
+        'timeline': bundle.get('timeline', []),
+    }
+
+
 async def load_incident_bundle(session: AsyncSession, incident_id: UUID | str, *, alert_limit: int = 100) -> dict:
     incident = (await session.execute(select(Incident).where(Incident.id == incident_id))).scalar_one_or_none()
     if incident is None:

@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+import os
 from datetime import datetime
 from uuid import UUID
 
@@ -30,6 +33,19 @@ def _request_metadata(request: Request) -> dict:
     }
 
 
+async def _verify_webhook_signature(request: Request) -> None:
+    secret = os.getenv('ALERT_WEBHOOK_SECRET')
+    if not secret:
+        return
+    provided = request.headers.get('X-SRE-AI-Signature') or request.headers.get('X-Hub-Signature-256')
+    if not provided:
+        raise HTTPException(status_code=401, detail='missing webhook signature')
+    signature = provided.removeprefix('sha256=')
+    expected = hmac.new(secret.encode('utf-8'), await request.body(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        raise HTTPException(status_code=401, detail='invalid webhook signature')
+
+
 @router.get('/health')
 async def health(session: AsyncSession = Depends(get_db)) -> dict:
     database = 'connected'
@@ -51,11 +67,12 @@ async def ready(session: AsyncSession = Depends(get_db)) -> dict:
 
 @router.post('/alerts', status_code=201)
 async def create_alert(
-    alert_in: AlertIn | AlertBatchIn,
+    alert_in: AlertBatchIn | AlertIn,
     request: Request,
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     session: AsyncSession = Depends(get_db),
 ) -> AlertOut | dict:
+    await _verify_webhook_signature(request)
     try:
         async with session.begin():
             if isinstance(alert_in, AlertBatchIn):

@@ -6,6 +6,7 @@ RUN useradd --create-home --shell /bin/bash appuser
 
 WORKDIR /app
 COPY shared /app/shared
+COPY --chown=appuser:appuser config /app/config
 COPY services/supervisor-agent /app/services/supervisor-agent
 RUN pip install --no-cache-dir --upgrade pip     && pip install --no-cache-dir -e /app/shared -r /app/services/supervisor-agent/requirements.txt
 

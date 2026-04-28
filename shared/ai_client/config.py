@@ -31,7 +31,7 @@ def resolve_settings_for_agent(agent_name: str, settings: Any | None = None) -> 
 
     timeout = float(extra_config.get('timeout') or os.getenv('AI_CLIENT_TIMEOUT', '15'))
 
-    if provider == 'gateway':
+    if provider in {'gateway', 'llmgateway'}:
         api_style = str(extra_config.get('api_style') or os.getenv('SNAPP_LLM_API_STYLE', 'openai')).strip().lower()
         base_url = str(
             extra_config.get('base_url')
@@ -46,13 +46,27 @@ def resolve_settings_for_agent(agent_name: str, settings: Any | None = None) -> 
         model = str(extra_config.get('model') or getattr(settings, 'model', None) or os.getenv('AI_MODEL', default_model))
         headers = {'X-Agent-Name': agent_name}
         return ResolvedAiSettings(
-            provider='gateway',
+            provider='llmgateway',
             model=model,
             api_key=api_key,
             base_url=base_url.rstrip('/'),
             api_style=api_style,
             timeout=timeout,
             default_headers=headers,
+        )
+
+    if provider == 'gapgpt':
+        base_url = str(extra_config.get('base_url') or os.getenv('GAPGPT_BASE_URL', 'https://api.gapgpt.app/v1'))
+        api_key = getattr(settings, 'api_key', None) or os.getenv('GAPGPT_API_KEY') or os.getenv('AI_API_KEY')
+        model = str(extra_config.get('model') or getattr(settings, 'model', None) or os.getenv('GAPGPT_DEFAULT_MODEL', 'gapgpt-qwen-3.5'))
+        return ResolvedAiSettings(
+            provider='gapgpt',
+            model=model,
+            api_key=api_key,
+            base_url=base_url.rstrip('/'),
+            api_style='openai',
+            timeout=timeout,
+            default_headers={'X-Agent-Name': agent_name},
         )
 
     base_url = str(extra_config.get('base_url') or os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'))

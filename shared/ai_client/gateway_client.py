@@ -9,7 +9,7 @@ from .config import ResolvedAiSettings
 
 
 class GatewayClient(BaseAIClient):
-    provider_name = 'gateway'
+    provider_name = 'llmgateway'
 
     def __init__(self, settings: ResolvedAiSettings, client: httpx.AsyncClient | None = None) -> None:
         self.settings = settings

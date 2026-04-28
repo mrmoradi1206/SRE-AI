@@ -14,6 +14,21 @@
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #101717;
+  --panel: rgba(23, 34, 33, 0.94);
+  --ink: #edf4ef;
+  --muted: #a7b5af;
+  --border: rgba(237, 244, 239, 0.12);
+  --accent: #7cd7bd;
+  --accent-soft: rgba(124, 215, 189, 0.16);
+  --danger: #ff9588;
+  --warning: #f2b05f;
+  --success: #7bd89f;
+  --closed: #bec4ce;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -25,6 +40,12 @@ body {
     radial-gradient(circle at top left, rgba(16, 74, 67, 0.12), transparent 30%),
     linear-gradient(180deg, #f7f4ee 0%, #efe8dc 100%);
   color: var(--ink);
+}
+
+:root[data-theme="dark"] body {
+  background:
+    radial-gradient(circle at top left, rgba(124, 215, 189, 0.14), transparent 32%),
+    linear-gradient(180deg, #101717 0%, #172120 100%);
 }
 
 a {
@@ -99,6 +120,10 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.topbar {
+  margin-bottom: 1.5rem;
 }
 
 .page-grid {
@@ -238,6 +263,22 @@ button:disabled {
   color: var(--closed);
 }
 
+.status-pending {
+  background: #e5e6ea;
+  color: var(--closed);
+}
+
+.status-ok {
+  background: #daf0e1;
+  color: var(--success);
+}
+
+.status-failed,
+.status-error {
+  background: #fde2e2;
+  color: var(--danger);
+}
+
 .severity-chip {
   display: inline-flex;
   align-items: center;
@@ -338,6 +379,17 @@ textarea {
   background: white;
 }
 
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea,
+:root[data-theme="dark"] .incident-row,
+:root[data-theme="dark"] .stack-item,
+:root[data-theme="dark"] .timeline-item,
+:root[data-theme="dark"] .health-card {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+}
+
 @media (max-width: 960px) {
   .shell {
     grid-template-columns: 1fr;
@@ -358,6 +410,138 @@ textarea {
 
   .toolbar,
   .detail-meta-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.provider-strip {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.provider-strip span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 0.45rem 0.8rem;
+  font-weight: 700;
+}
+
+.llm-agent-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.workflow-rail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 1.2rem;
+}
+
+.workflow-node {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.55);
+  display: grid;
+  gap: 0.35rem;
+}
+
+.workflow-node span {
+  font-weight: 800;
+}
+
+.node-ok {
+  border-color: rgba(34, 113, 74, 0.35);
+  background: rgba(34, 113, 74, 0.12);
+}
+
+.node-error,
+.node-failed {
+  border-color: rgba(180, 63, 47, 0.35);
+  background: rgba(180, 63, 47, 0.12);
+}
+
+.json-input {
+  min-height: 360px;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.json-viewer {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.json-viewer summary {
+  cursor: pointer;
+  padding: 0.85rem 1rem;
+  font-weight: 800;
+  background: var(--accent-soft);
+}
+
+.badge-row,
+.secret-grid,
+.prompt-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.badge-row {
+  grid-template-columns: repeat(2, minmax(0, max-content));
+}
+
+.provider-badge,
+.model-badge {
+  border-radius: 999px;
+  padding: 0.4rem 0.75rem;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.model-badge {
+  background: rgba(29, 31, 28, 0.07);
+  color: var(--muted);
+}
+
+.prompt-details {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 0.85rem 1rem;
+}
+
+.prompt-details summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.prompt-card {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.prompt-grid,
+.secret-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.field-hint {
+  display: block;
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin: 0.2rem 0 0.45rem;
+}
+
+@media (max-width: 960px) {
+  .workflow-rail,
+  .badge-row {
     grid-template-columns: 1fr;
   }
 }

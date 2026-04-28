@@ -17,7 +17,20 @@ x-agent-env: &agent-env
   AI_MODEL: ${AI_MODEL:-local-fallback}
   AI_API_KEY: ${AI_API_KEY:-}
   AI_EXTRA_CONFIG: ${AI_EXTRA_CONFIG:-{}}
+  LLM_CONFIG_PATH: ${LLM_CONFIG_PATH:-/app/config/llm_config.json}
+  LLM_RUNTIME_SECRETS_PATH: ${LLM_RUNTIME_SECRETS_PATH:-/app/config/llm_runtime_secrets.json}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+  LLM_GATEWAY_API_KEY: ${LLM_GATEWAY_API_KEY:-}
+  LLM_GATEWAY_BASE_URL: ${LLM_GATEWAY_BASE_URL:-https://llm.snapp.tech/v1}
+  GAPGPT_API_KEY: ${GAPGPT_API_KEY:-}
+  GAPGPT_BASE_URL: ${GAPGPT_BASE_URL:-https://api.gapgpt.app/v1}
+  GAPGPT_DEFAULT_MODEL: ${GAPGPT_DEFAULT_MODEL:-gapgpt-qwen-3.5}
   HTTP_TIMEOUT: ${HTTP_TIMEOUT:-10}
+  ALERT_WEBHOOK_SECRET: ${ALERT_WEBHOOK_SECRET:-}
+  MAX_ALERT_JSON_BYTES: ${MAX_ALERT_JSON_BYTES:-262144}
+  MAX_ALERT_BATCH_SIZE: ${MAX_ALERT_BATCH_SIZE:-100}
+  LLM_MAX_BACKOFF_SECONDS: ${LLM_MAX_BACKOFF_SECONDS:-8}
   HTTP_MAX_RETRIES: ${HTTP_MAX_RETRIES:-3}
   HTTP_BACKOFF_SECONDS: ${HTTP_BACKOFF_SECONDS:-0.5}
   HTTP_CIRCUIT_BREAKER_THRESHOLD: ${HTTP_CIRCUIT_BREAKER_THRESHOLD:-3}
@@ -69,6 +82,8 @@ services:
         condition: service_healthy
     ports:
       - "${HISTORY_AGENT_PORT:-8001}:8001"
+    volumes:
+      - ./config:/app/config
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/ready')\""]
       interval: 15s
@@ -95,6 +110,8 @@ services:
         condition: service_healthy
     ports:
       - "${REPORT_AGENT_PORT:-8002}:8002"
+    volumes:
+      - ./config:/app/config
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/ready')\""]
       interval: 15s
@@ -123,6 +140,8 @@ services:
         condition: service_healthy
     ports:
       - "${SUPERVISOR_AGENT_PORT:-8003}:8003"
+    volumes:
+      - ./config:/app/config
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/ready')\""]
       interval: 15s

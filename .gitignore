@@ -5,6 +5,8 @@ __pycache__/
 .mypy_cache/
 *.log
 *.zip
+config/llm_runtime_secrets.json
+llm_runtime_secrets.json
 node_modules/
 dist/
 services/nginx/ui/dist/

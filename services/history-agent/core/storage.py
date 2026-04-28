@@ -72,7 +72,8 @@ async def ingest_alert(
     ).scalar_one_or_none()
 
     opened_event = None
-    if incident is None or should_reopen_incident(incident, observed_at=now, stale_after_hours=REOPEN_STALE_AFTER_HOURS):
+    is_reopen = incident is not None and should_reopen_incident(incident, observed_at=now, stale_after_hours=REOPEN_STALE_AFTER_HOURS)
+    if incident is None or is_reopen:
         incident = Incident(
             fingerprint=fingerprint,
             grouping_key=grouping_key,
@@ -86,7 +87,7 @@ async def ingest_alert(
         )
         session.add(incident)
         await session.flush()
-        event_type = 'history.incident_reopened' if incident is not None and incident.id else 'history.incident_opened'
+        event_type = 'history.incident_reopened' if is_reopen else 'history.incident_opened'
         opened_event = await append_event(
             session,
             stream_id=incident.id,

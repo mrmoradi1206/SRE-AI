@@ -8,4 +8,10 @@ def test_ui_contains_dashboard_and_search_assets():
 
     assert 'Recent alerts' in app
     assert 'Search summary, fingerprint, grouping key' in app
+    assert 'LLM Settings' in app
+    assert 'Test Workflow' in app
+    assert 'Test LLM call' in app
+    assert 'Runtime API keys' in app
+    assert 'location /api/config/' in nginx_conf
+    assert 'location = /api/test-workflow' in nginx_conf
     assert 'location /api/' in nginx_conf

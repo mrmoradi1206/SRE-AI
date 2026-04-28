@@ -2,6 +2,30 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, NavLink, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
+const PROVIDER_LABELS = {
+  openrouter: 'OpenRouter',
+  llmgateway: 'LLM Gateway',
+  gapgpt: 'GapGPT',
+};
+const SYSTEM_PROMPTS = {
+  history: 'Ingest alerts, deduplicate by fingerprint, persist append-only incident history, and expose query APIs.',
+  supervisor: 'Analyze trusted incident context and untrusted alert payloads, then produce structured lifecycle guidance.',
+  report: 'Turn structured incident analysis into a concise human-readable SRE report for operators.',
+};
+const SAMPLE_ALERT = {
+  source: 'ui-test',
+  severity: 'critical',
+  summary: 'Checkout latency is above SLO',
+  labels: {
+    alertname: 'HighCheckoutLatency',
+    service: 'checkout',
+    instance: 'checkout-api-1',
+    namespace: 'payments',
+  },
+  annotations: {
+    description: 'p95 latency has exceeded 2s for 10 minutes.',
+  },
+};
 
 async function apiFetch(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -20,12 +44,59 @@ function StatusChip({ status }) {
   return <span className={`status-chip status-${normalized}`}>{normalized}</span>;
 }
 
+function providerLabel(provider) {
+  return PROVIDER_LABELS[provider] || provider;
+}
+
+function JsonBlock({ data, title = 'JSON' }) {
+  return (
+    <details className="json-viewer" open>
+      <summary>{title}</summary>
+      <pre>{typeof data === 'string' ? data : JSON.stringify(data, null, 2)}</pre>
+    </details>
+  );
+}
+
+function ProviderBadge({ provider }) {
+  return <span className="provider-badge">{providerLabel(provider || 'unknown')}</span>;
+}
+
+function ModelBadge({ model }) {
+  return <span className="model-badge">{model || 'model not selected'}</span>;
+}
+
+function WorkflowRail({ trace = [] }) {
+  const statusFor = (name) => trace.find((step) => step.name === name)?.status || 'pending';
+  return (
+    <div className="workflow-rail">
+      {[
+        ['history.ingest', 'Alert'],
+        ['history.context', 'History'],
+        ['supervisor.analyze', 'Supervisor'],
+        ['report.generate', 'Report'],
+      ].map(([name, label]) => (
+        <div key={name} className={`workflow-node node-${statusFor(name)}`}>
+          <span>{label}</span>
+          <small>{statusFor(name)}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SeverityChip({ severity }) {
   const normalized = (severity || 'unknown').toLowerCase();
   return <span className={`severity-chip severity-${normalized}`}>{normalized}</span>;
 }
 
 function Shell({ children }) {
+  const [theme, setTheme] = useState(() => localStorage.getItem('sre-ai-theme') || 'light');
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('sre-ai-theme', theme);
+  }, [theme]);
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -37,8 +108,9 @@ function Shell({ children }) {
         <nav>
           <NavLink to="/">Dashboard</NavLink>
           <NavLink to="/incidents">Incidents</NavLink>
+          <NavLink to="/workflow">Test Workflow</NavLink>
           <NavLink to="/agents">Agents</NavLink>
-          <NavLink to="/settings">Settings</NavLink>
+          <NavLink to="/settings">LLM Settings</NavLink>
         </nav>
       </aside>
       <main className="content">
@@ -48,6 +120,9 @@ function Shell({ children }) {
             <h2>AIOps incident dashboard</h2>
           </div>
           <span className="topbar-note">Searchable timeline, safe pagination, provider-aware AI actions</span>
+          <button type="button" className="ghost-button" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
+            {theme === 'light' ? 'Dark mode' : 'Light mode'}
+          </button>
         </header>
         {children}
       </main>
@@ -371,6 +446,83 @@ function IncidentDetailPage() {
   );
 }
 
+function WorkflowTestPage() {
+  const [rawAlert, setRawAlert] = useState(JSON.stringify(SAMPLE_ALERT, null, 2));
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const runWorkflow = async () => {
+    setBusy(true);
+    setError('');
+    setResult(null);
+    try {
+      const parsed = JSON.parse(rawAlert);
+      const response = await apiFetch('/test-workflow', { method: 'POST', body: JSON.stringify(parsed) });
+      setResult(response);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="page-grid">
+      <div className="hero-card span-2">
+        <p className="eyebrow">Guided simulation</p>
+        <h3>Run Alert → History → Supervisor → Report</h3>
+        <p>Paste a raw alert payload, run the full workflow, and review sanitized LLM traces plus intermediate node output.</p>
+        <WorkflowRail trace={result?.trace || []} />
+      </div>
+
+      <div className="panel">
+        <div className="panel-header">
+          <h3>Raw alert JSON</h3>
+          <button type="button" className="ghost-button" onClick={() => setRawAlert(JSON.stringify(SAMPLE_ALERT, null, 2))}>Reset sample</button>
+        </div>
+        <textarea className="json-input" value={rawAlert} onChange={(event) => setRawAlert(event.target.value)} />
+        <div className="action-row wrap">
+          <button type="button" disabled={busy} onClick={runWorkflow}>{busy ? 'Running workflow...' : 'Test Alert'}</button>
+        </div>
+        {error ? <p className="error-text">{error}</p> : null}
+      </div>
+
+      <div className="panel">
+        <div className="panel-header">
+          <h3>Workflow result</h3>
+          <StatusChip status={result?.status || 'pending'} />
+        </div>
+        {result ? (
+          <div className="stack-list">
+            <JsonBlock title="Step trace" data={result.trace || []} />
+            <JsonBlock title="LLM request/response trace (sanitized)" data={result.llm_calls || []} />
+            <JsonBlock title="Supervisor reasoning" data={result.supervisor || {}} />
+            <JsonBlock title="Final report" data={result.report || {}} />
+          </div>
+        ) : (
+          <p>Run a test alert to see the full structured trace.</p>
+        )}
+      </div>
+
+      <div className="panel span-2">
+        <div className="panel-header">
+          <h3>Node system prompts</h3>
+          <span>Provider-agnostic behavior</span>
+        </div>
+        <div className="prompt-grid">
+          {Object.entries(SYSTEM_PROMPTS).map(([node, prompt]) => (
+            <article key={node} className="prompt-card">
+              <p className="eyebrow">{node}</p>
+              <p>{prompt}</p>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function AgentsPage() {
   const [health, setHealth] = useState([]);
   const [error, setError] = useState('');
@@ -403,73 +555,191 @@ function AgentsPage() {
 }
 
 function SettingsPage() {
-  const [form, setForm] = useState({ provider: 'openrouter', model: 'openai/gpt-4o-mini', api_key: '', extra_config: '{}' });
+  const [config, setConfig] = useState(null);
+  const [draft, setDraft] = useState(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [testing, setTesting] = useState('');
+  const [testResults, setTestResults] = useState({});
+  const [secretStatus, setSecretStatus] = useState({});
+  const [secretDraft, setSecretDraft] = useState({});
 
-  useEffect(() => {
-    apiFetch('/supervisor/settings')
-      .then((settings) => {
-        setForm({
-          provider: settings.provider || 'openrouter',
-          model: settings.model || 'openai/gpt-4o-mini',
-          api_key: settings.api_key || '',
-          extra_config: JSON.stringify(settings.extra_config || {}, null, 2),
-        });
-      })
-      .catch((err) => setError(err.message));
-  }, []);
-
-  const save = async (event) => {
-    event.preventDefault();
-    setMessage('');
+  const load = async () => {
     setError('');
     try {
-      const payload = {
-        provider: form.provider,
-        model: form.model,
-        api_key: form.api_key,
-        extra_config: JSON.parse(form.extra_config || '{}'),
-      };
-      const result = await apiFetch('/supervisor/settings', { method: 'PUT', body: JSON.stringify(payload) });
-      setMessage(`Saved settings for ${result.provider} / ${result.model}`);
+      const [nextConfig, nextSecrets] = await Promise.all([
+        apiFetch('/config/llm'),
+        apiFetch('/config/llm/secrets'),
+      ]);
+      setConfig(nextConfig);
+      setDraft(JSON.parse(JSON.stringify(nextConfig)));
+      setSecretStatus(nextSecrets.providers || {});
+      setSecretDraft({});
     } catch (err) {
       setError(err.message);
     }
   };
 
+  useEffect(() => {
+    load();
+  }, []);
+
+  const updateAgent = (agent, patch) => {
+    setDraft((current) => {
+      const next = JSON.parse(JSON.stringify(current));
+      const currentAgent = next.agents[agent];
+      const updated = { ...currentAgent, ...patch };
+      if (patch.provider && patch.provider !== currentAgent.provider) {
+        updated.model = next.models[patch.provider]?.[0] || '';
+      }
+      next.agents[agent] = updated;
+      return next;
+    });
+  };
+
+  const save = async () => {
+    setMessage('');
+    setError('');
+    try {
+      const saved = await apiFetch('/config/llm', { method: 'POST', body: JSON.stringify(draft) });
+      setConfig(saved);
+      setDraft(JSON.parse(JSON.stringify(saved)));
+      setMessage('LLM configuration saved and reloaded. Agents will use it on their next call.');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const testAgent = async (agent) => {
+    setTesting(agent);
+    setMessage('');
+    setError('');
+    try {
+      const result = await apiFetch(`/config/llm/test/${agent}`, { method: 'POST' });
+      setTestResults((current) => ({ ...current, [agent]: result }));
+    } catch (err) {
+      setTestResults((current) => ({ ...current, [agent]: { ok: false, content: err.message } }));
+    } finally {
+      setTesting('');
+    }
+  };
+
+  const saveSecrets = async () => {
+    setMessage('');
+    setError('');
+    try {
+      const secrets = Object.fromEntries(Object.entries(secretDraft).filter(([, value]) => value));
+      await apiFetch('/config/llm/secrets', { method: 'POST', body: JSON.stringify({ secrets }) });
+      setSecretDraft({});
+      setMessage('API keys saved to the runtime secret store. No key values are shown or committed.');
+      const nextSecrets = await apiFetch('/config/llm/secrets');
+      setSecretStatus(nextSecrets.providers || {});
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  if (!draft) {
+    return <section className="panel">{error ? <p className="error-text">{error}</p> : <p>Loading LLM settings...</p>}</section>;
+  }
+
+  const agents = Object.keys(draft.agents || {});
+
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <h3>AI settings</h3>
-        <span>Stored in postgres</span>
-      </div>
-      <form className="settings-form" onSubmit={save}>
-        <label>
-          Provider
-          <select value={form.provider} onChange={(event) => setForm({ ...form, provider: event.target.value })}>
-            <option value="openrouter">OpenRouter</option>
-            <option value="gateway">Snapp Gateway</option>
-          </select>
-        </label>
-        <label>
-          Model
-          <input value={form.model} onChange={(event) => setForm({ ...form, model: event.target.value })} />
-        </label>
-        <label>
-          API key
-          <input type="password" value={form.api_key} onChange={(event) => setForm({ ...form, api_key: event.target.value })} />
-        </label>
-        <label>
-          Extra config
-          <textarea rows="8" value={form.extra_config} onChange={(event) => setForm({ ...form, extra_config: event.target.value })} />
-        </label>
-        <div className="action-row">
-          <button type="submit">Save settings</button>
+    <section className="page-grid">
+      <div className="hero-card span-2">
+        <p className="eyebrow">LLM Settings</p>
+        <h3>Live model routing per agent</h3>
+        <p>Switch providers and models without rebuilding containers. The backend reloads this file-backed config on each LLM call.</p>
+        <div className="provider-strip">
+          {draft.providers.map((provider) => <span key={provider}>{providerLabel(provider)}</span>)}
         </div>
-      </form>
-      {message ? <p className="success-text">{message}</p> : null}
-      {error ? <p className="error-text">{error}</p> : null}
+      </div>
+
+      {agents.map((agent) => {
+        const selection = draft.agents[agent];
+        const models = draft.models[selection.provider] || [];
+        const result = testResults[agent];
+        return (
+          <article key={agent} className="panel llm-agent-card">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Agent</p>
+                <h3>{agent}</h3>
+              </div>
+              <StatusChip status={result?.ok ? 'resolved' : 'open'} />
+            </div>
+            <div className="badge-row">
+              <ProviderBadge provider={selection.provider} />
+              <ModelBadge model={selection.model} />
+            </div>
+            <details className="prompt-details">
+              <summary>System prompt</summary>
+              <p>{SYSTEM_PROMPTS[agent] || 'Provider-agnostic agent prompt managed by backend configuration.'}</p>
+            </details>
+            <label>
+              Provider
+              <select value={selection.provider} onChange={(event) => updateAgent(agent, { provider: event.target.value })}>
+                {draft.providers.map((provider) => <option key={provider} value={provider}>{providerLabel(provider)}</option>)}
+              </select>
+            </label>
+            <label>
+              Model
+              <select value={selection.model} onChange={(event) => updateAgent(agent, { model: event.target.value })}>
+                {models.map((model) => <option key={model} value={model}>{model}</option>)}
+              </select>
+            </label>
+            <div className="action-row wrap">
+              <button type="button" onClick={save}>Save & reload config</button>
+              <button type="button" className="ghost-button" disabled={testing === agent} onClick={() => testAgent(agent)}>
+                {testing === agent ? 'Testing...' : 'Test LLM call'}
+              </button>
+            </div>
+            {result ? <pre>{JSON.stringify(result, null, 2)}</pre> : null}
+          </article>
+        );
+      })}
+
+      <div className="panel span-2">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Secrets</p>
+            <h3>Runtime API keys</h3>
+          </div>
+          <button type="button" className="ghost-button" onClick={saveSecrets}>Save API Keys</button>
+        </div>
+        <p>Keys are written to the ignored runtime secret store and never displayed after save. Leave a field blank to keep the current value.</p>
+        <div className="secret-grid">
+          {Object.entries(draft.provider_settings || {}).map(([provider, settings]) => {
+            const envName = settings.api_key_env;
+            const status = secretStatus[provider] || {};
+            return (
+              <label key={provider}>
+                {providerLabel(provider)} API key
+                <span className="field-hint">
+                  {envName} · {status.env_configured || status.configured ? 'configured' : 'not configured'}
+                </span>
+                <input
+                  type="password"
+                  value={secretDraft[envName] || ''}
+                  placeholder="Paste key to update runtime secret"
+                  onChange={(event) => setSecretDraft((current) => ({ ...current, [envName]: event.target.value }))}
+                />
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="panel span-2">
+        <div className="panel-header">
+          <h3>Current config</h3>
+          <button type="button" className="ghost-button" onClick={load}>Refresh</button>
+        </div>
+        {message ? <p className="success-text">{message}</p> : null}
+        {error ? <p className="error-text">{error}</p> : null}
+        <pre>{JSON.stringify(config || draft, null, 2)}</pre>
+      </div>
     </section>
   );
 }
@@ -479,6 +749,7 @@ export default function App() {
     <Shell>
       <Routes>
         <Route path="/" element={<DashboardPage />} />
+        <Route path="/workflow" element={<WorkflowTestPage />} />
         <Route path="/incidents" element={<IncidentsPage />} />
         <Route path="/incidents/:incidentId" element={<IncidentDetailPage />} />
         <Route path="/agents" element={<AgentsPage />} />

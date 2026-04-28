@@ -1,21 +1,29 @@
-from uuid import UUID
+import hashlib
+import hmac
+import json
+import os
+import time
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aiops_shared.database import get_db
+from aiops_shared.context_loader import normalize_incident_bundle
 from aiops_shared.dlq import enqueue_dead_letter
 from aiops_shared.event_store import append_event
 from aiops_shared.idempotency import ensure_idempotency_key, get_existing_event_by_idempotency
-from aiops_shared.models import AISettings, DeadLetterQueue, Incident, IncidentStatus
-from aiops_shared.schemas import AISettingsIn, AISettingsOut, DeadLetterOut, QueueItemOut, SupervisorAnalyzeIn, SupervisorStatusChangeIn
+from aiops_shared.models import DeadLetterQueue, EventQueue, Incident, IncidentStatus
+from aiops_shared.schemas import AISettingsIn, AISettingsOut, DeadLetterOut, QueueItemOut, RuntimeSecretsIn, SupervisorAnalyzeIn, SupervisorStatusChangeIn, TestWorkflowIn
+from aiops_shared.secret_store import SecretStoreError, get_runtime_secret, save_runtime_secrets
 from aiops_shared.utils import health_payload, utcnow
 from aiops_shared.http_client import AsyncServiceClient
+from aiops_shared.llm_client import LLMError, run_llm
+from aiops_shared.llm_config import LLMConfigError, get_agent_llm_config, load_llm_config, save_llm_config
 from aiops_shared.fsm import apply_transition
 from aiops_shared.projector import apply_event_to_projection
 from aiops_shared.queue import enqueue_job
-from aiops_shared.models import EventQueue
 
 from core.analyzer import AnalysisService
 from core.config import (
@@ -25,6 +33,7 @@ from core.config import (
     HTTP_CIRCUIT_BREAKER_THRESHOLD,
     HTTP_MAX_RETRIES,
     HTTP_TIMEOUT,
+    REPORT_AGENT_URL,
     SERVICE_NAME,
 )
 
@@ -53,7 +62,45 @@ def _metadata(request: Request) -> dict:
 
 def _correlation_uuid(request: Request) -> UUID | None:
     raw = getattr(request.state, 'correlation_id', None)
-    return UUID(str(raw)) if raw else None
+    if not raw:
+        return None
+    try:
+        return UUID(str(raw))
+    except ValueError:
+        return None
+
+
+def _event_metadata(event) -> dict:
+    return getattr(event, 'event_metadata', {}) or {}
+
+
+def _step(name: str, started: float, status: str, **extra) -> dict:
+    return {'name': name, 'status': status, 'duration_ms': round((time.perf_counter() - started) * 1000, 2), **extra}
+
+
+def _signed_alert_request(alert_payload: dict, workflow_id: str) -> dict:
+    body = json.dumps(alert_payload, separators=(',', ':'), default=str).encode('utf-8')
+    headers = {'Idempotency-Key': f'test-workflow:history:{workflow_id}', 'Content-Type': 'application/json'}
+    secret = os.getenv('ALERT_WEBHOOK_SECRET')
+    if secret:
+        signature = hmac.new(secret.encode('utf-8'), body, hashlib.sha256).hexdigest()
+        headers['X-SRE-AI-Signature'] = f'sha256={signature}'
+    return {'content': body, 'headers': headers}
+
+
+async def _with_similar_incidents(incident_bundle: dict) -> dict:
+    bundle = normalize_incident_bundle(incident_bundle)
+    incident = bundle.get('incident', {})
+    query = incident.get('summary') or incident.get('fingerprint') or incident.get('grouping_key')
+    if not query:
+        return incident_bundle
+    try:
+        response = await http_client.get(f'{HISTORY_AGENT_URL}/incidents', params={'query': query, 'page': 1, 'page_size': 5})
+        similar = response.json().get('items', [])
+    except Exception:  # noqa: BLE001
+        similar = []
+    bundle['similar_incidents'] = [item for item in similar if str(item.get('id')) != str(incident.get('id'))]
+    return bundle
 
 
 @plain_router.get('/health')
@@ -75,6 +122,165 @@ async def ready(session: AsyncSession = Depends(get_db)) -> dict:
     return health_payload(SERVICE_NAME, 'connected', readiness='ready')
 
 
+
+
+@plain_router.get('/config/llm')
+async def get_llm_config() -> dict:
+    try:
+        return load_llm_config()
+    except LLMConfigError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@plain_router.post('/config/llm')
+async def update_llm_config(payload: dict) -> dict:
+    try:
+        return save_llm_config(payload)
+    except LLMConfigError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail='failed to save LLM config') from exc
+
+
+@plain_router.post('/config/llm/test/{agent_name}')
+async def test_llm_config(agent_name: str) -> dict:
+    try:
+        selection = get_agent_llm_config(agent_name)
+        response = await run_llm(
+            selection['provider'],
+            selection['model'],
+            [
+                {'role': 'system', 'content': 'You are an SRE-AI connectivity test. Reply with compact JSON.'},
+                {'role': 'user', 'content': f'Return JSON confirming that the {agent_name} agent LLM route works.'},
+            ],
+            temperature=0.0,
+            max_tokens=120,
+        )
+        return {
+            'agent': agent_name,
+            'provider': response['provider'],
+            'model': response['model'],
+            'ok': True,
+            'content': response['content'],
+        }
+    except LLMConfigError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LLMError as exc:
+        raise HTTPException(status_code=502, detail={'provider': exc.provider, 'model': exc.model, 'message': exc.message, 'retryable': exc.retryable}) from exc
+
+
+@plain_router.get('/config/llm/secrets')
+async def get_runtime_secret_status() -> dict:
+    config = load_llm_config()
+    status = {}
+    for provider, settings in config.get('provider_settings', {}).items():
+        env_name = settings.get('api_key_env')
+        if not env_name:
+            continue
+        try:
+            runtime_configured = bool(get_runtime_secret(env_name))
+        except SecretStoreError:
+            runtime_configured = False
+        status[provider] = {
+            'api_key_env': env_name,
+            'configured': runtime_configured,
+            'env_configured': bool(os.getenv(env_name)),
+        }
+    return {'providers': status}
+
+
+@plain_router.post('/config/llm/secrets')
+async def update_runtime_secrets(payload: RuntimeSecretsIn) -> dict:
+    try:
+        saved = save_runtime_secrets(payload.secrets)
+    except SecretStoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {'saved': {key: bool(value) for key, value in saved.items()}}
+
+
+@plain_router.post('/test-workflow')
+async def test_workflow(payload: TestWorkflowIn, request: Request, session: AsyncSession = Depends(get_db)) -> dict:
+    trace: list[dict] = []
+    workflow_id = str(uuid4())
+    alert_payload = payload.alert.model_dump(mode='json', exclude_none=True)
+
+    started = time.perf_counter()
+    try:
+        alert_request = _signed_alert_request(alert_payload, workflow_id)
+        ingest_response = await http_client.post(
+            f'{HISTORY_AGENT_URL}/alerts',
+            **alert_request,
+        )
+        ingestion = ingest_response.json()
+        incident_id = ingestion.get('incident_id')
+        trace.append(_step('history.ingest', started, 'ok', incident_id=incident_id))
+    except Exception as exc:  # noqa: BLE001
+        trace.append(_step('history.ingest', started, 'error', error=str(exc)))
+        return {'workflow_id': workflow_id, 'status': 'failed', 'trace': trace}
+
+    started = time.perf_counter()
+    try:
+        detail_response = await http_client.get(f'{HISTORY_AGENT_URL}/incidents/{incident_id}')
+        incident_bundle = await _with_similar_incidents(detail_response.json())
+        trace.append(_step('history.context', started, 'ok'))
+    except Exception as exc:  # noqa: BLE001
+        trace.append(_step('history.context', started, 'error', error=str(exc)))
+        return {'workflow_id': workflow_id, 'status': 'failed', 'incident_id': incident_id, 'history': ingestion, 'trace': trace}
+
+    started = time.perf_counter()
+    try:
+        async with session.begin():
+            incident = (await session.execute(select(Incident).where(Incident.id == UUID(str(incident_id))))).scalar_one_or_none()
+            if incident is None:
+                raise LookupError('incident not found after ingestion')
+            decision = await service.analyze(
+                session,
+                incident,
+                incident_bundle,
+                reasoning_mode='balanced',
+                actor='test-workflow',
+                metadata=_metadata(request) | {'workflow_id': workflow_id},
+                correlation_id=_correlation_uuid(request),
+                idempotency_key=f'test-workflow:supervisor:{workflow_id}',
+            )
+        trace.append(_step('supervisor.analyze', started, 'ok', provider=decision.get('provider'), model=decision.get('model')))
+    except Exception as exc:  # noqa: BLE001
+        trace.append(_step('supervisor.analyze', started, 'error', error=str(exc)))
+        return {'workflow_id': workflow_id, 'status': 'failed', 'incident_id': incident_id, 'history': ingestion, 'trace': trace}
+
+    started = time.perf_counter()
+    try:
+        report_response = await http_client.post(
+            f'{REPORT_AGENT_URL}/report/{incident_id}',
+            json={'analysis': decision},
+            headers={'Idempotency-Key': f'test-workflow:report:{workflow_id}'},
+        )
+        report = report_response.json()
+        trace.append(_step('report.generate', started, 'ok', provider=report.get('provider'), model=report.get('model')))
+    except Exception as exc:  # noqa: BLE001
+        trace.append(_step('report.generate', started, 'error', error=str(exc)))
+        return {
+            'workflow_id': workflow_id,
+            'status': 'failed',
+            'incident_id': incident_id,
+            'history': ingestion,
+            'supervisor': decision,
+            'trace': trace,
+            'llm_calls': [decision.get('llm_trace')],
+        }
+
+    return {
+        'workflow_id': workflow_id,
+        'status': 'ok',
+        'incident_id': incident_id,
+        'history': ingestion,
+        'supervisor': decision,
+        'report': report,
+        'trace': trace,
+        'llm_calls': [item for item in [decision.get('llm_trace'), report.get('llm_trace')] if item],
+    }
+
+
 @router.post('/analyze')
 async def analyze(
     payload: SupervisorAnalyzeIn,
@@ -86,11 +292,11 @@ async def analyze(
     async with session.begin():
         existing = await get_existing_event_by_idempotency(session, effective_idempotency_key)
         if existing is not None:
-            return {'incident_id': str(payload.incident_id), 'deduplicated': True, **existing.metadata.get('reasoning_output', existing.payload)}
+            return {'incident_id': str(payload.incident_id), 'deduplicated': True, **_event_metadata(existing).get('reasoning_output', existing.payload)}
 
     try:
         detail_response = await http_client.get(f'{HISTORY_AGENT_URL}/incidents/{payload.incident_id}')
-        incident_bundle = detail_response.json()
+        incident_bundle = await _with_similar_incidents(detail_response.json())
     except Exception as exc:
         async with session.begin():
             await enqueue_dead_letter(
@@ -260,19 +466,11 @@ async def get_settings(session: AsyncSession = Depends(get_db)) -> AISettingsOut
 
 @router.put('/settings', response_model=AISettingsOut)
 async def update_settings(payload: AISettingsIn, session: AsyncSession = Depends(get_db)) -> AISettingsOut:
-    async with session.begin():
-        settings = (await session.execute(select(AISettings).order_by(AISettings.id.asc()).limit(1))).scalar_one_or_none()
-        if settings is None:
-            settings = AISettings(provider=payload.provider, model=payload.model, api_key=payload.api_key, extra_config=payload.extra_config, version=1)
-            session.add(settings)
-            await session.flush()
-        else:
-            settings.provider = payload.provider
-            settings.model = payload.model
-            settings.api_key = payload.api_key
-            settings.extra_config = payload.extra_config
-            settings.version += 1
-    return AISettingsOut(id=settings.id, provider=settings.provider, model=settings.model, api_key=settings.api_key, extra_config=settings.extra_config, version=settings.version)
+    config = load_llm_config()
+    config['agents']['supervisor'] = {'provider': payload.provider, 'model': payload.model}
+    saved = save_llm_config(config)
+    selection = saved['agents']['supervisor']
+    return AISettingsOut(id=None, provider=selection['provider'], model=selection['model'], api_key=None, extra_config={}, version=None)
 
 
 @router.get('/dlq', response_model=list[DeadLetterOut])

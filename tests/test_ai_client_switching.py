@@ -4,7 +4,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'shared'))
 
-from ai_client import GatewayClient, OpenRouterClient, resolve_client_for_agent
+from ai_client import GapGPTClient, GatewayClient, OpenRouterClient, resolve_client_for_agent
 from ai_client.config import resolve_settings_for_agent
 
 
@@ -27,10 +27,20 @@ def test_resolve_openrouter_client(monkeypatch):
 
 
 def test_resolve_gateway_client(monkeypatch):
-    monkeypatch.setenv('AI_PROVIDER', 'gateway')
+    monkeypatch.setenv('AI_PROVIDER', 'llmgateway')
     monkeypatch.setenv('SNAPP_LLM_API_KEY', 'gw-key')
-    settings = resolve_settings_for_agent('report-agent', FakeSettings(provider='gateway', extra_config={'api_style': 'anthropic'}))
-    client = resolve_client_for_agent('report-agent', FakeSettings(provider='gateway', extra_config={'api_style': 'anthropic'}))
-    assert settings.provider == 'gateway'
+    settings = resolve_settings_for_agent('report-agent', FakeSettings(provider='llmgateway', extra_config={'api_style': 'anthropic'}))
+    client = resolve_client_for_agent('report-agent', FakeSettings(provider='llmgateway', extra_config={'api_style': 'anthropic'}))
+    assert settings.provider == 'llmgateway'
     assert settings.api_style == 'anthropic'
     assert isinstance(client, GatewayClient)
+
+
+def test_resolve_gapgpt_client(monkeypatch):
+    monkeypatch.setenv('AI_PROVIDER', 'gapgpt')
+    monkeypatch.setenv('GAPGPT_API_KEY', 'gap-key')
+    settings = resolve_settings_for_agent('report-agent', FakeSettings(provider='gapgpt'))
+    client = resolve_client_for_agent('report-agent', FakeSettings(provider='gapgpt'))
+    assert settings.provider == 'gapgpt'
+    assert settings.base_url == 'https://api.gapgpt.app/v1'
+    assert isinstance(client, GapGPTClient)

@@ -1,3 +1,5 @@
+import json
+import os
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -21,6 +23,25 @@ class AlertIn(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra='allow')
+
+    @field_validator('event_key', 'source', 'severity', 'grouping_key', 'dedup_key', 'summary')
+    @classmethod
+    def validate_short_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        cleaned = value.strip()
+        if len(cleaned) > 512 or any(ch in cleaned for ch in ['\x00', '\r']):
+            raise ValueError('field contains invalid text')
+        return cleaned
+
+    @field_validator('payload', 'metadata')
+    @classmethod
+    def validate_json_size(cls, value: dict[str, Any]) -> dict[str, Any]:
+        max_bytes = int(os.getenv('MAX_ALERT_JSON_BYTES', '262144'))
+        encoded = json.dumps(value, default=str, separators=(',', ':')).encode('utf-8')
+        if len(encoded) > max_bytes:
+            raise ValueError(f'JSON object exceeds {max_bytes} bytes')
+        return value
 
     @model_validator(mode='before')
     @classmethod
@@ -51,6 +72,14 @@ class AlertBatchIn(BaseModel):
     alerts: list[AlertIn] = Field(default_factory=list, min_length=1)
 
     model_config = ConfigDict(extra='allow')
+
+    @field_validator('alerts')
+    @classmethod
+    def validate_batch_size(cls, value: list[AlertIn]) -> list[AlertIn]:
+        max_alerts = int(os.getenv('MAX_ALERT_BATCH_SIZE', '100'))
+        if len(value) > max_alerts:
+            raise ValueError(f'batch exceeds {max_alerts} alerts')
+        return value
 
 
 class EventEnvelopeOut(BaseModel):
@@ -193,6 +222,29 @@ class SupervisorDecisionOut(BaseModel):
     recommended_actions: list[dict[str, Any]] = Field(default_factory=list)
     next_state: str
     reasoning_trace: str
+
+
+class ReportGenerateIn(BaseModel):
+    analysis: dict[str, Any] | None = None
+
+
+class TestWorkflowIn(BaseModel):
+    alert: AlertIn | dict[str, Any] | None = None
+
+    model_config = ConfigDict(extra='allow')
+
+    @model_validator(mode='after')
+    def ensure_alert_payload(self) -> 'TestWorkflowIn':
+        if self.alert is None:
+            raw = self.model_dump(exclude={'alert'}, exclude_none=True)
+            self.alert = AlertIn.model_validate(raw)
+        elif isinstance(self.alert, dict):
+            self.alert = AlertIn.model_validate(self.alert)
+        return self
+
+
+class RuntimeSecretsIn(BaseModel):
+    secrets: dict[str, str] = Field(default_factory=dict)
 
 
 class SupervisorStatusChangeIn(BaseModel):

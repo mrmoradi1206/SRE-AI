@@ -1,7 +1,8 @@
 {
   "providers": [
     "openrouter",
-    "llmgateway"
+    "llmgateway",
+    "gapgpt"
   ],
   "models": {
     "openrouter": [
@@ -14,7 +15,29 @@
       "zai/glm-5",
       "minimax/MiniMax-M2.7",
       "kimi/kimi-k2.5"
+    ],
+    "gapgpt": [
+      "gapgpt-qwen-3.5",
+      "gpt-4o",
+      "gemini-2.5-pro"
     ]
+  },
+  "provider_settings": {
+    "openrouter": {
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "default_model": "openai/gpt-4o-mini"
+    },
+    "llmgateway": {
+      "base_url": "https://llm.snapp.tech/v1",
+      "api_key_env": "LLM_GATEWAY_API_KEY",
+      "default_model": "zai/glm-5.1"
+    },
+    "gapgpt": {
+      "base_url": "https://api.gapgpt.app/v1",
+      "api_key_env": "GAPGPT_API_KEY",
+      "default_model": "gapgpt-qwen-3.5"
+    }
   },
   "agents": {
     "supervisor": {

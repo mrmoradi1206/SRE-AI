@@ -65,4 +65,5 @@ def normalize_severity(alert_payload: dict[str, Any], fallback: str = 'unknown')
         'sev3': 'low',
         'warning': 'medium',
     }
-    return aliases.get(normalized, normalized or fallback)
+    value = aliases.get(normalized, normalized or fallback)
+    return value if value in {'critical', 'high', 'medium', 'low', 'unknown'} else 'unknown'

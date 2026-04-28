@@ -7,15 +7,34 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-SUPPORTED_PROVIDERS = {'openrouter', 'llmgateway'}
+SUPPORTED_PROVIDERS = {'openrouter', 'llmgateway', 'gapgpt'}
 KNOWN_AGENTS = {'supervisor', 'report'}
+PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
+    'openrouter': {
+        'base_url': 'https://openrouter.ai/api/v1',
+        'api_key_env': 'OPENROUTER_API_KEY',
+        'default_model': 'openai/gpt-4o-mini',
+    },
+    'llmgateway': {
+        'base_url': 'https://llm.snapp.tech/v1',
+        'api_key_env': 'LLM_GATEWAY_API_KEY',
+        'default_model': 'zai/glm-5.1',
+    },
+    'gapgpt': {
+        'base_url': 'https://api.gapgpt.app/v1',
+        'api_key_env': 'GAPGPT_API_KEY',
+        'default_model': 'gapgpt-qwen-3.5',
+    },
+}
 
 DEFAULT_LLM_CONFIG: dict[str, Any] = {
-    'providers': ['openrouter', 'llmgateway'],
+    'providers': ['openrouter', 'llmgateway', 'gapgpt'],
     'models': {
         'openrouter': ['meta-llama/llama-3.1-8b-instruct', 'qwen/qwen-2.5-72b-instruct', 'openai/gpt-4o-mini'],
         'llmgateway': ['zai/glm-5.1', 'zai/glm-5', 'minimax/MiniMax-M2.7', 'kimi/kimi-k2.5'],
+        'gapgpt': ['gapgpt-qwen-3.5', 'gpt-4o', 'gemini-2.5-pro'],
     },
+    'provider_settings': deepcopy(PROVIDER_DEFAULTS),
     'agents': {
         'supervisor': {'provider': 'llmgateway', 'model': 'zai/glm-5.1'},
         'report': {'provider': 'openrouter', 'model': 'meta-llama/llama-3.1-8b-instruct'},
@@ -77,6 +96,30 @@ def validate_llm_config(config: dict[str, Any]) -> dict[str, Any]:
                 deduped.append(model)
         models[provider] = deduped
 
+    raw_settings = config.get('provider_settings', {})
+    if raw_settings is None:
+        raw_settings = {}
+    if not isinstance(raw_settings, dict):
+        raise LLMConfigError('provider_settings must be an object')
+    provider_settings: dict[str, dict[str, str]] = {}
+    for provider in providers:
+        values = raw_settings.get(provider, {})
+        if values is None:
+            values = {}
+        if not isinstance(values, dict):
+            raise LLMConfigError(f'provider_settings.{provider} must be an object')
+        defaults = PROVIDER_DEFAULTS[provider]
+        base_url = _clean_string(values.get('base_url', defaults['base_url']), f'provider_settings.{provider}.base_url')
+        api_key_env = _clean_string(values.get('api_key_env', defaults['api_key_env']), f'provider_settings.{provider}.api_key_env')
+        default_model = _clean_string(values.get('default_model', defaults['default_model']), f'provider_settings.{provider}.default_model')
+        if default_model not in models[provider]:
+            default_model = models[provider][0]
+        provider_settings[provider] = {
+            'base_url': base_url.rstrip('/'),
+            'api_key_env': api_key_env,
+            'default_model': default_model,
+        }
+
     raw_agents = config.get('agents', {})
     if not isinstance(raw_agents, dict):
         raise LLMConfigError('agents must be an object')
@@ -102,7 +145,7 @@ def validate_llm_config(config: dict[str, Any]) -> dict[str, Any]:
             model = default['model'] if default['model'] in models[provider] else models[provider][0]
             agents[agent] = {'provider': provider, 'model': model}
 
-    return {'providers': providers, 'models': models, 'agents': agents}
+    return {'providers': providers, 'models': models, 'provider_settings': provider_settings, 'agents': agents}
 
 
 def load_llm_config() -> dict[str, Any]:
@@ -133,3 +176,11 @@ def get_agent_llm_config(agent: str) -> dict[str, str]:
     if agent_name not in config['agents']:
         raise LLMConfigError(f'unsupported agent: {agent_name}')
     return dict(config['agents'][agent_name])
+
+
+def get_provider_settings(provider: str) -> dict[str, str]:
+    config = load_llm_config()
+    provider_name = _clean_string(provider, 'provider')
+    if provider_name not in config['provider_settings']:
+        raise LLMConfigError(f'unsupported provider: {provider_name}')
+    return dict(config['provider_settings'][provider_name])

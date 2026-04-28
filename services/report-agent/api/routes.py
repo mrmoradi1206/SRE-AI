@@ -10,12 +10,12 @@ from aiops_shared.event_store import append_event
 from aiops_shared.http_client import AsyncServiceClient
 from aiops_shared.idempotency import ensure_idempotency_key, get_existing_event_by_idempotency
 from aiops_shared.metrics import AGENT_ACTIONS
-from aiops_shared.models import AISettings, Incident, IncidentEvent
+from aiops_shared.llm_config import get_agent_llm_config
+from aiops_shared.models import Incident, IncidentEvent
+from aiops_shared.schemas import ReportGenerateIn
 from aiops_shared.utils import health_payload
 
 from core.config import (
-    AI_MODEL,
-    AI_PROVIDER,
     HISTORY_AGENT_URL,
     HTTP_BACKOFF_SECONDS,
     HTTP_CIRCUIT_BREAKER_RESET_SECONDS,
@@ -48,6 +48,16 @@ def _metadata(request: Request) -> dict:
     }
 
 
+def _correlation_uuid(request: Request) -> UUID | None:
+    raw = getattr(request.state, 'correlation_id', None)
+    if not raw:
+        return None
+    try:
+        return UUID(str(raw))
+    except ValueError:
+        return None
+
+
 @router.get('/health')
 async def health(session: AsyncSession = Depends(get_db)) -> dict:
     database = 'connected'
@@ -71,6 +81,7 @@ async def ready(session: AsyncSession = Depends(get_db)) -> dict:
 async def generate_report(
     incident_id: str,
     request: Request,
+    payload: ReportGenerateIn | None = None,
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -91,13 +102,14 @@ async def generate_report(
                 operation='generate_report.fetch_incident',
                 payload={'incident_id': incident_id},
                 error_message=str(exc),
-                correlation_id=UUID(str(getattr(request.state, 'correlation_id', None))) if getattr(request.state, 'correlation_id', None) else None,
+                correlation_id=_correlation_uuid(request),
                 idempotency_key=effective_idempotency_key,
             )
         raise HTTPException(status_code=502, detail='failed to fetch incident context') from exc
 
-    settings = (await session.execute(select(AISettings).order_by(AISettings.id.asc()).limit(1))).scalar_one_or_none()
-    report_text = await formatter.render(incident_bundle, provider=AI_PROVIDER, model=AI_MODEL, settings=settings)
+    llm_settings = get_agent_llm_config('report')
+    render_result = await formatter.render_with_trace(incident_bundle, provider=llm_settings['provider'], model=llm_settings['model'])
+    report_text = render_result['report']
 
     async with session.begin():
         incident = (await session.execute(select(Incident).where(Incident.id == incident_id))).scalar_one_or_none()
@@ -108,13 +120,28 @@ async def generate_report(
             stream_id=incident.id,
             event_type='report.report_generated',
             actor='report-agent',
-            correlation_id=UUID(str(getattr(request.state, 'correlation_id', None))) if getattr(request.state, 'correlation_id', None) else None,
+            correlation_id=_correlation_uuid(request),
             idempotency_key=effective_idempotency_key,
-            payload={'report': report_text, 'provider': AI_PROVIDER, 'model': AI_MODEL},
+            payload={
+                'report': report_text,
+                'provider': llm_settings['provider'],
+                'model': llm_settings['model'],
+                'analysis': payload.analysis if payload else None,
+                'fallback_used': render_result['fallback_used'],
+                'llm_trace': render_result.get('llm_trace'),
+            },
             metadata=_metadata(request),
         )
     AGENT_ACTIONS.labels('report-agent', 'report_generated').inc()
-    return {'incident_id': incident_id, 'report': report_text, 'event_id': str(event.event_id)}
+    return {
+        'incident_id': incident_id,
+        'report': report_text,
+        'event_id': str(event.event_id),
+        'provider': llm_settings['provider'],
+        'model': llm_settings['model'],
+        'fallback_used': render_result['fallback_used'],
+        'llm_trace': render_result.get('llm_trace'),
+    }
 
 
 @router.get('/report/{incident_id}')
