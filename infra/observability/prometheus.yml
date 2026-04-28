@@ -1,13 +1,22 @@
 global:
   scrape_interval: 15s
+  external_labels:
+    cluster: 'sre-ai'
+    replica: '{{.ExternalURL}}'
+
+# Basic auth file should be mounted at /etc/prometheus/web-config.yml
+# web.config.file: /etc/prometheus/web-config.yml
 
 scrape_configs:
   - job_name: 'history-agent'
     static_configs:
       - targets: ['history-agent:8001']
+    metrics_path: /metrics
   - job_name: 'report-agent'
     static_configs:
       - targets: ['report-agent:8002']
+    metrics_path: /metrics
   - job_name: 'supervisor-agent'
     static_configs:
       - targets: ['supervisor-agent:8003']
+    metrics_path: /metrics
