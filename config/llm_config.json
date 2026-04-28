@@ -1,0 +1,29 @@
+{
+  "providers": [
+    "openrouter",
+    "llmgateway"
+  ],
+  "models": {
+    "openrouter": [
+      "meta-llama/llama-3.1-8b-instruct",
+      "qwen/qwen-2.5-72b-instruct",
+      "openai/gpt-4o-mini"
+    ],
+    "llmgateway": [
+      "zai/glm-5.1",
+      "zai/glm-5",
+      "minimax/MiniMax-M2.7",
+      "kimi/kimi-k2.5"
+    ]
+  },
+  "agents": {
+    "supervisor": {
+      "provider": "llmgateway",
+      "model": "zai/glm-5.1"
+    },
+    "report": {
+      "provider": "openrouter",
+      "model": "meta-llama/llama-3.1-8b-instruct"
+    }
+  }
+}
