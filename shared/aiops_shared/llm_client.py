@@ -176,6 +176,9 @@ def _is_retryable(exc: Exception) -> bool:
     return False
 
 
+_gapgpt_client_cache: dict[str, Any] = {}
+
+
 async def _run_gapgpt(
     selected_provider: str,
     selected_model: str,
@@ -188,8 +191,13 @@ async def _run_gapgpt(
     except ImportError as exc:
         raise LLMError(selected_provider, selected_model, 'openai package is not installed') from exc
 
-    try:
+    cache_key = f'{selected_provider}:{api_key[:8]}'
+    client = _gapgpt_client_cache.get(cache_key)
+    if client is None:
         client = AsyncOpenAI(api_key=api_key, base_url=_base_url(selected_provider), timeout=request_timeout)
+        _gapgpt_client_cache[cache_key] = client
+
+    try:
         response = await client.chat.completions.create(**payload)
         content = response.choices[0].message.content if response.choices else None
         if not isinstance(content, str) or not content.strip():
@@ -243,7 +251,8 @@ async def run_llm(
 
     last_error: Exception | None = None
     started = time.perf_counter()
-    async with httpx.AsyncClient(timeout=request_timeout) as client:
+    client = httpx.AsyncClient(timeout=request_timeout)
+    try:
         for attempt in range(max(1, attempts)):
             try:
                 logger.info('llm_call_started', extra={'provider': selected_provider, 'model': selected_model})
@@ -312,6 +321,8 @@ async def run_llm(
 
             delay = min(backoff * (2 ** attempt), max_backoff) + random.random() * 0.1
             await asyncio.sleep(delay)
+    finally:
+        await client.aclose()
 
     LLM_CALLS.labels(selected_provider, selected_model, 'error').inc()
     raise LLMError(selected_provider, selected_model, str(last_error or 'LLM request failed'), retryable=True)
