@@ -69,9 +69,9 @@ class AlertIn(BaseModel):
 
 
 class AlertBatchIn(BaseModel):
-    alerts: list[AlertIn] = Field(default_factory=list, min_length=1)
+    alerts: list[AlertIn] = Field(min_length=1)
 
-    model_config = ConfigDict(extra='allow')
+    model_config = ConfigDict(extra='forbid')
 
     @field_validator('alerts')
     @classmethod

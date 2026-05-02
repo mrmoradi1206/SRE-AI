@@ -207,7 +207,9 @@ BEGIN
     current_status := (SELECT status FROM incidents WHERE id = NEW.stream_id);
     target_status := COALESCE((NEW.payload->>'to')::incident_status, current_status);
 
-    IF current_status = 'open' AND target_status NOT IN ('investigating') THEN
+    IF current_status = target_status THEN
+        RETURN NEW;
+    ELSIF current_status = 'open' AND target_status NOT IN ('investigating') THEN
         RAISE EXCEPTION 'invalid transition from % to %', current_status, target_status;
     ELSIF current_status = 'investigating' AND target_status NOT IN ('mitigating') THEN
         RAISE EXCEPTION 'invalid transition from % to %', current_status, target_status;

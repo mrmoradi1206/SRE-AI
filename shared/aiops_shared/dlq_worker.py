@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 
 from sqlalchemy import select
@@ -86,7 +87,7 @@ async def run_dlq_worker(
     stop_event: asyncio.Event,
     *,
     service: str | None = None,
-    processor: asyncio.abc.Coroutine | None = None,
+    processor: Callable[[DeadLetterQueue], Awaitable[None]] | None = None,
     poll_interval: float = DEFAULT_POLL_INTERVAL_SECONDS,
     batch_size: int = DEFAULT_BATCH_SIZE,
     max_retries: int = DEFAULT_MAX_RETRIES,

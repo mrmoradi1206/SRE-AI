@@ -9,6 +9,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
 
+def _enum_values(enum_class: type[enum.Enum]) -> list[str]:
+    return [member.value for member in enum_class]
+
+
 class IncidentStatus(str, enum.Enum):
     OPEN = 'open'
     INVESTIGATING = 'investigating'
@@ -52,12 +56,12 @@ class Incident(Base):
     dedup_key: Mapped[str] = mapped_column(Text, index=True, nullable=False)
     summary: Mapped[str | None] = mapped_column(Text)
     severity: Mapped[IncidentSeverity] = mapped_column(
-        Enum(IncidentSeverity, name='incident_severity'),
+        Enum(IncidentSeverity, name='incident_severity', values_callable=_enum_values),
         nullable=False,
         default=IncidentSeverity.UNKNOWN,
     )
     status: Mapped[IncidentStatus] = mapped_column(
-        Enum(IncidentStatus, name='incident_status'),
+        Enum(IncidentStatus, name='incident_status', values_callable=_enum_values),
         nullable=False,
         default=IncidentStatus.OPEN,
     )
@@ -163,7 +167,7 @@ class DeadLetterQueue(Base):
     service: Mapped[str] = mapped_column(Text, nullable=False)
     operation: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[DeadLetterStatus] = mapped_column(
-        Enum(DeadLetterStatus, name='dead_letter_status'),
+        Enum(DeadLetterStatus, name='dead_letter_status', values_callable=_enum_values),
         nullable=False,
         default=DeadLetterStatus.PENDING,
     )
@@ -186,7 +190,7 @@ class EventQueue(Base):
     correlation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
     idempotency_key: Mapped[str | None] = mapped_column(Text, unique=True)
     status: Mapped[QueueStatus] = mapped_column(
-        Enum(QueueStatus, name='queue_status'),
+        Enum(QueueStatus, name='queue_status', values_callable=_enum_values),
         nullable=False,
         default=QueueStatus.PENDING,
     )
