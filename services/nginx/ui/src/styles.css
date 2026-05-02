@@ -770,6 +770,22 @@ textarea:focus {
   color: var(--muted);
 }
 
+.copy-card {
+  display: grid;
+  gap: 0.35rem;
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px dashed rgba(14, 107, 92, 0.45);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+
+.copy-card code {
+  color: var(--accent-strong);
+  font-weight: 900;
+  word-break: break-all;
+}
+
 .prompt-details {
   padding: 0.85rem 1rem;
 }

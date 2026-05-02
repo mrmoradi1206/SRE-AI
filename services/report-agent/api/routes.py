@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -115,23 +116,29 @@ async def generate_report(
         incident = (await session.execute(select(Incident).where(Incident.id == incident_id))).scalar_one_or_none()
         if incident is None:
             raise HTTPException(status_code=404, detail='incident not found')
-        event = await append_event(
-            session,
-            stream_id=incident.id,
-            event_type='report.report_generated',
-            actor='report-agent',
-            correlation_id=_correlation_uuid(request),
-            idempotency_key=effective_idempotency_key,
-            payload={
-                'report': report_text,
-                'provider': llm_settings['provider'],
-                'model': llm_settings['model'],
-                'analysis': payload.analysis if payload else None,
-                'fallback_used': render_result['fallback_used'],
-                'llm_trace': render_result.get('llm_trace'),
-            },
-            metadata=_metadata(request),
-        )
+        try:
+            event = await append_event(
+                session,
+                stream_id=incident.id,
+                event_type='report.report_generated',
+                actor='report-agent',
+                correlation_id=_correlation_uuid(request),
+                idempotency_key=effective_idempotency_key,
+                payload={
+                    'report': report_text,
+                    'provider': llm_settings['provider'],
+                    'model': llm_settings['model'],
+                    'analysis': payload.analysis if payload else None,
+                    'fallback_used': render_result['fallback_used'],
+                    'llm_trace': render_result.get('llm_trace'),
+                },
+                metadata=_metadata(request),
+            )
+        except IntegrityError:
+            existing = await get_existing_event_by_idempotency(session, effective_idempotency_key)
+            if existing is not None:
+                return {'incident_id': incident_id, 'report': existing.payload.get('report'), 'deduplicated': True}
+            raise
     AGENT_ACTIONS.labels('report-agent', 'report_generated').inc()
     return {
         'incident_id': incident_id,

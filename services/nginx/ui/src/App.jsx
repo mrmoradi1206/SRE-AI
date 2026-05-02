@@ -30,6 +30,7 @@ const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', hint: 'Command overview' },
   { to: '/incidents', label: 'Incidents', hint: 'Triage queue' },
   { to: '/workflow', label: 'Test Workflow', hint: 'End-to-end drill' },
+  { to: '/integrations', label: 'Integrations', hint: 'Alertmanager webhook' },
   { to: '/agents', label: 'Agents', hint: 'Service readiness' },
   { to: '/settings', label: 'LLM Settings', hint: 'Model routing' },
 ];
@@ -637,6 +638,172 @@ function AgentsPage() {
   );
 }
 
+function IntegrationPage() {
+  const [host, setHost] = useState(() => window.location.hostname || '<server-ip>');
+  const [port, setPort] = useState(() => window.location.port || '8080');
+  const [scheme, setScheme] = useState(() => window.location.protocol.replace(':', '') || 'http');
+  const [secret, setSecret] = useState('');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const baseUrl = `${scheme}://${host}${port ? `:${port}` : ''}`;
+  const webhookUrl = `${baseUrl}/api/alertmanager/webhook`;
+  const composeReceiver = `receivers:
+  - name: sre-ai
+    webhook_configs:
+      - url: '${webhookUrl}'
+        send_resolved: false${secret ? `\n        http_config:\n          authorization:\n            type: Bearer\n            credentials: '${secret}'` : ''}`;
+  const curlCommand = `curl -X POST '${webhookUrl}' \\
+  -H 'Content-Type: application/json'${secret ? ` \\\n  -H 'Authorization: Bearer ${secret}'` : ''} \\
+  -d '{
+    "receiver": "sre-ai",
+    "status": "firing",
+    "alerts": [
+      {
+        "status": "firing",
+        "labels": {
+          "alertname": "SREAITestAlert",
+          "severity": "critical",
+          "service": "checkout",
+          "instance": "demo-1"
+        },
+        "annotations": {
+          "summary": "Synthetic Alertmanager alert",
+          "description": "This test should ingest an alert and trigger supervisor analysis/report generation."
+        },
+        "startsAt": "${new Date().toISOString()}",
+        "generatorURL": "manual-ui"
+      }
+    ],
+    "groupLabels": {"alertname": "SREAITestAlert"},
+    "commonLabels": {"severity": "critical"},
+    "commonAnnotations": {"summary": "Synthetic Alertmanager alert"}
+  }'`;
+
+  const sendTest = async () => {
+    setBusy(true);
+    setMessage('');
+    setError('');
+    try {
+      const payload = {
+        receiver: 'sre-ai',
+        status: 'firing',
+        alerts: [
+          {
+            status: 'firing',
+            labels: { alertname: 'SREAITestAlert', severity: 'critical', service: 'checkout', instance: 'ui-test' },
+            annotations: {
+              summary: 'Synthetic Alertmanager alert',
+              description: 'UI test webhook should start History - Supervisor - Report automatically.',
+            },
+            startsAt: new Date().toISOString(),
+            generatorURL: 'sre-ai-ui',
+          },
+        ],
+        groupLabels: { alertname: 'SREAITestAlert' },
+        commonLabels: { severity: 'critical' },
+        commonAnnotations: { summary: 'Synthetic Alertmanager alert' },
+      };
+      const result = await fetch('/api/alertmanager/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(secret ? { Authorization: `Bearer ${secret}` } : {}) },
+        body: JSON.stringify(payload),
+      });
+      if (!result.ok) {
+        throw new Error(await result.text());
+      }
+      setMessage('Test alert accepted. The history agent ingested it and queued the full workflow.');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="page-grid">
+      <div className="hero-card span-2">
+        <div className="hero-copy">
+          <p className="eyebrow">Alertmanager integration</p>
+          <h3>Connect by IP and port</h3>
+          <p>
+            Point Alertmanager at this webhook. Every firing alert is ingested by History, then Supervisor analysis and
+            Report generation run automatically through the queue worker.
+          </p>
+        </div>
+        <WorkflowRail trace={[
+          { name: 'history.ingest', status: 'ok' },
+          { name: 'history.context', status: 'ok' },
+          { name: 'supervisor.analyze', status: 'ok' },
+          { name: 'report.generate', status: 'ok' },
+        ]} />
+      </div>
+
+      <div className="panel">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Public endpoint</p>
+            <h3>Webhook URL builder</h3>
+          </div>
+        </div>
+        <div className="secret-grid">
+          <label>
+            Scheme
+            <select value={scheme} onChange={(event) => setScheme(event.target.value)}>
+              <option value="http">http</option>
+              <option value="https">https</option>
+            </select>
+          </label>
+          <label>
+            Server IP / DNS
+            <input value={host} onChange={(event) => setHost(event.target.value)} placeholder="192.0.2.10" />
+          </label>
+          <label>
+            UI/API port
+            <input value={port} onChange={(event) => setPort(event.target.value)} placeholder="8080 or 80" />
+          </label>
+          <label>
+            Optional bearer token
+            <input type="password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="Only if you protect nginx upstream" />
+          </label>
+        </div>
+        <div className="copy-card">
+          <span className="field-hint">Use this in Alertmanager</span>
+          <code>{webhookUrl}</code>
+        </div>
+        <div className="action-row wrap">
+          <button type="button" disabled={busy} onClick={sendTest}>{busy ? 'Sending...' : 'Send Test Alert'}</button>
+          <Link className="ghost-button" to="/incidents">Open incidents</Link>
+        </div>
+        {message ? <p className="success-text">{message}</p> : null}
+        {error ? <p className="error-text">{error}</p> : null}
+      </div>
+
+      <div className="panel">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Alertmanager YAML</p>
+            <h3>Receiver snippet</h3>
+          </div>
+        </div>
+        <p>Add this receiver to Alertmanager and route firing alerts to `sre-ai`.</p>
+        <pre>{composeReceiver}</pre>
+      </div>
+
+      <div className="panel span-2">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Manual check</p>
+            <h3>curl test</h3>
+          </div>
+        </div>
+        <pre>{curlCommand}</pre>
+      </div>
+    </section>
+  );
+}
+
 function SettingsPage() {
   const [config, setConfig] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -835,6 +1002,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/workflow" element={<WorkflowTestPage />} />
+        <Route path="/integrations" element={<IntegrationPage />} />
         <Route path="/incidents" element={<IncidentsPage />} />
         <Route path="/incidents/:incidentId" element={<IncidentDetailPage />} />
         <Route path="/agents" element={<AgentsPage />} />

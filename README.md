@@ -148,6 +148,7 @@ All frontend/API traffic is served through one listener, prefixed by `/api`:
   - `GET /api/history/health`
   - `GET /api/history/ready`
   - `POST /api/history/alerts`
+  - `POST /api/alertmanager/webhook` (Alertmanager-compatible webhook forwarded to alert ingestion)
   - `GET /api/history/incidents`
   - `GET /api/history/incidents/{incident_id}`
   - `GET /api/history/incidents/{incident_id}/events/replay`
@@ -218,6 +219,28 @@ curl -X POST http://127.0.0.1:8080/api/test-workflow \
     "payload": {"description": "p95 latency above 2s for 10 minutes"}
   }'
 ```
+
+Connect Alertmanager by IP and port:
+
+1. Open `http://<server-ip>:8080/integrations`.
+2. Enter the public IP/DNS and port that Alertmanager can reach.
+3. Copy the generated webhook URL, usually:
+
+```text
+http://<server-ip>:8080/api/alertmanager/webhook
+```
+
+4. Add it to Alertmanager:
+
+```yaml
+receivers:
+  - name: sre-ai
+    webhook_configs:
+      - url: http://<server-ip>:8080/api/alertmanager/webhook
+        send_resolved: false
+```
+
+Every firing Alertmanager alert is ingested by `history-agent`. The ingestion path queues `supervisor-agent`, and the supervisor queue worker generates a report after analysis, so the full History -> Supervisor -> Report workflow runs automatically.
 
 ---
 
