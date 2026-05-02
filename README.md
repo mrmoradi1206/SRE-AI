@@ -333,7 +333,7 @@ Observability validation:
 docker compose up -d --build
 curl -s http://127.0.0.1:${PROMETHEUS_PORT:-9090}/api/v1/rules | jq '.data.groups[].name'
 curl -s http://127.0.0.1:${PROMETHEUS_PORT:-9090}/api/v1/alerts | jq '.data.alerts | length'
-curl -s http://127.0.0.1:${ALERTMANAGER_PORT:-9093}/api/v1/status
+curl -s http://127.0.0.1:${ALERTMANAGER_PORT:-9093}/api/v2/status
 ```
 
 You can also force a fireable alert by temporarily stopping `node-exporter`:
