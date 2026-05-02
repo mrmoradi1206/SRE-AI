@@ -1,94 +1,253 @@
 # SRE-AI
 
-SRE-AI is a Docker-first multi-agent incident workflow with three FastAPI services, PostgreSQL, and an nginx-served React SPA.
+SRE-AI is a Docker-first, multi-agent incident platform:
 
-## Architecture
+- `history-agent`: receives and deduplicates incoming alerts, stores incidents/events, and provides history APIs
+- `report-agent`: generates incident reports from supervisor context
+- `supervisor-agent`: owns incident lifecycle transitions and AI analysis
+- `postgres`: durable storage
+- `nginx`: reverse proxy, API facade, and React UI host
+- `prometheus`, `alertmanager`, `node-exporter`, and `grafana` for observability
+- `jaeger`: optional distributed tracing
 
-- `history-agent`: append-only alert ingestion, incident lookup, timeline search, dashboard metrics
-- `report-agent`: reads incident context from `history-agent` and writes only `report_generated` events
-- `supervisor-agent`: the only service allowed to change `incident.status`; it analyzes, acknowledges, resolves, and closes incidents
-- `postgres`: persistence for alerts, incidents, events, and AI settings
-- `nginx`: reverse proxy plus static UI hosting on `http://localhost:8080`
+Everything is wired for local/VM deployment with one compose file.
+
+---
+
+## Repository map
+
+- `services/history-agent/` service implementation, tests entrypoints, and local README
+- `services/report-agent/` service implementation and local README
+- `services/supervisor-agent/` service implementation and local README
+- `services/nginx/` reverse-proxy and Vite React UI
+- `shared/` shared models, database helpers, schemas, and clients
+- `infra/postgres/` DB bootstrap + migrations
+- `tests/` high-signal API/shared-unit tests
+- `config/llm_config.json` runtime LLM routing config (mounted into containers)
+
+---
 
 ## Quick start
 
-```bash
-cd "/mnt/d/sre ai/SRE-AI"
-cp .env.example .env
-# edit .env for real secrets if needed
+### 1) Prerequisites
 
+- Docker Engine + Docker Compose v2
+- `git` (for deployments)
+- Optional for local UI development: Node 20 (the Docker build handles this automatically)
+
+### 2) Configure environment
+
+Create `.env` in repository root from the template:
+
+```bash
+cp .env.example .env
+```
+
+Then override these values for your environment (minimum required for local run):
+
+```bash
+POSTGRES_DB=sre_ai
+POSTGRES_USER=sre_ai
+POSTGRES_PASSWORD=change_me
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+DATABASE_URL=postgresql+asyncpg://sre_ai:change_me@postgres:5432/sre_ai
+
+DB_POOL_SIZE=10
+DB_MAX_OVERFLOW=20
+DB_POOL_RECYCLE_SECONDS=1800
+
+HISTORY_AGENT_PORT=8001
+REPORT_AGENT_PORT=8002
+SUPERVISOR_AGENT_PORT=8003
+NGINX_PORT=8080
+PROMETHEUS_PORT=9090
+ALERTMANAGER_PORT=9093
+NODE_EXPORTER_PORT=9100
+GRAFANA_PORT=3000
+JAEGER_UI_PORT=16686
+JAEGER_AGENT_PORT=6831
+```
+
+Keep the remaining values from `.env.example` unless you have a different deployment target.
+
+Set strong credentials for passwords and API keys before production deployment.
+
+### 3) Start the stack
+
+```bash
 docker compose up -d --build
 ```
 
-## Service endpoints
-
-- `http://localhost:8001/health` - history-agent
-- `http://localhost:8002/health` - report-agent
-- `http://localhost:8003/health` - supervisor-agent
-- `http://localhost:8080` - UI through nginx
-
-## Repo layout
-
-- `infra/postgres/` - schema bootstrap and migrations
-- `shared/aiops_shared/` - shared DB, schema, HTTP, and utility modules
-- `services/history-agent/` - alert ingestion and incident views
-- `services/report-agent/` - report generation and report-event storage
-- `services/supervisor-agent/` - lifecycle decisions and AI settings
-- `services/nginx/` - reverse proxy and React/Vite SPA
-
-## Dynamic LLM Routing
-
-SRE-AI loads LLM provider/model routing from `config/llm_config.json` at runtime. The file is mounted into the agent containers at `/app/config/llm_config.json`, so changes through the UI or API are picked up without rebuilding or redeploying.
-
-Supported providers:
-
-- `openrouter` - OpenAI-compatible chat completions at `OPENROUTER_BASE_URL`.
-- `llmgateway` - Snapp LLM Gateway OpenAI-compatible chat completions at `LLM_GATEWAY_BASE_URL`.
-- `gapgpt` - GapGPT OpenAI-compatible chat completions at `GAPGPT_BASE_URL`.
-
-Required secrets are provided through environment variables or the ignored runtime secret store and are never stored in `config/llm_config.json`:
+### 4) Verify all services are healthy
 
 ```bash
-OPENROUTER_API_KEY=...
-LLM_GATEWAY_API_KEY=...
-GAPGPT_API_KEY=...
+docker compose ps
+docker compose logs -f --tail=100 nginx
 ```
 
-The UI can update runtime API keys through `POST /api/config/llm/secrets`. Those values are written to `config/llm_runtime_secrets.json`, which is ignored by git and mounted into agent containers. For immutable production deploys, prefer environment or orchestrator-managed secrets.
+You can also probe health endpoints directly:
 
-The shared runtime client lives in `shared/aiops_shared/llm_client.py` and exposes:
-
-```python
-await run_llm(provider, model, messages, temperature=0.1)
+```bash
+curl -s http://127.0.0.1:8080/api/history/health
+curl -s http://127.0.0.1:8080/api/report/health
+curl -s http://127.0.0.1:8080/api/supervisor/health
 ```
 
-All supervisor and report LLM calls route through this client. It handles provider selection, timeouts, retries, sanitized logging, and structured `LLMError` failures.
+---
 
-### LLM Config API
+## Accessing the UI
 
-Through nginx:
+Default public entrypoint is `http://<server-ip>:8080` because `NGINX_PORT` defaults to `8080`.
 
-- `GET /api/config/llm` - returns providers, models, and current per-agent routing.
-- `POST /api/config/llm` - validates and saves provider/model routing.
-- `GET /api/config/llm/secrets` - returns masked runtime secret status by provider.
-- `POST /api/config/llm/secrets` - saves API keys to the ignored runtime secret store.
-- `POST /api/config/llm/test/{agent}` - performs a real test LLM call for `supervisor` or `report`.
-- `POST /api/test-workflow` - accepts a raw alert JSON payload and runs History -> Supervisor -> Report with sanitized trace output.
+- If you open `:80` and see nothing, Nginx is usually not bound to that host port because `NGINX_PORT` defaults to `8080`.
+- To use port 80, set `NGINX_PORT=80` in `.env`, then run:
 
-Example config:
+```bash
+docker compose up -d --build nginx
+```
+
+- To verify host binding:
+
+```bash
+docker compose port nginx 80
+```
+
+- Use the SPA directly:
+
+  - `/` — Dashboard
+  - `/incidents` — Incident queue with filtering
+  - `/incidents/:incidentId` — Incident details and timeline
+  - `/workflow` — End-to-end workflow simulator
+  - `/agents` — Service readiness/status
+  - `/settings` — LLM routing and runtime API keys
+
+---
+
+## Service endpoints
+
+### Exposed by compose (host ports)
+
+| Service | Port | Endpoint |
+| --- | --- | --- |
+| history-agent | `8001` | `GET /health`, `GET /ready`, plus incident APIs |
+| report-agent | `8002` | `GET /health`, `GET /ready`, report generation/retrieval APIs |
+| supervisor-agent | `8003` | `GET /health`, `GET /ready`, lifecycle & config APIs |
+| nginx UI/API | `8080` (or `NGINX_PORT`) | Browser UI + API facade |
+| prometheus | `9090` (or `PROMETHEUS_PORT`) | scrape UI and metrics rules UI |
+| alertmanager | `9093` (or `ALERTMANAGER_PORT`) | alerting UI and silence/group view |
+| grafana | `3000` (or `GRAFANA_PORT`) | dashboard UI (Prometheus pre-provisioned) |
+| node-exporter | `9100` (or `NODE_EXPORTER_PORT`) | host/node metrics scraper |
+| jaeger UI | `16686` | traces |
+
+### Nginx API facade
+
+All frontend/API traffic is served through one listener, prefixed by `/api`:
+
+- History (prefix `/api/history/` and `/api/`)
+  - `GET /api/history/health`
+  - `GET /api/history/ready`
+  - `POST /api/history/alerts`
+  - `GET /api/history/incidents`
+  - `GET /api/history/incidents/{incident_id}`
+  - `GET /api/history/incidents/{incident_id}/events/replay`
+  - `GET /api/history/dashboard`
+  - `GET /api/history/alerts/recent`
+- Report (prefix `/api/report/`)
+  - `GET /api/report/health`
+  - `GET /api/report/ready`
+  - `POST /api/report/{incident_id}`
+  - `GET /api/report/{incident_id}`
+- Supervisor config + workflow (prefix `/api/supervisor/` for status/ops, `/api/config/` and `/api/test-workflow` for settings)
+  - `GET /api/supervisor/health`
+  - `GET /api/supervisor/ready`
+  - `POST /api/supervisor/analyze`
+  - `POST /api/supervisor/queue/analyze`
+  - `POST /api/supervisor/investigate|mitigate|resolve|close|acknowledge`
+  - `GET /api/supervisor/settings`
+  - `PUT /api/supervisor/settings`
+  - `GET /api/supervisor/dlq`
+  - `GET /api/supervisor/queue`
+  - `GET /api/config/llm`
+  - `POST /api/config/llm`
+  - `GET /api/config/llm/secrets`
+  - `POST /api/config/llm/secrets`
+  - `POST /api/config/llm/test/{agent}`
+  - `POST /api/test-workflow`
+
+---
+
+## Alert API usage examples
+
+Submit a single alert:
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/history/alerts \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source": "pagerduty",
+    "severity": "critical",
+    "summary": "Checkout latency above SLO",
+    "labels": {"service": "checkout", "namespace": "payments"},
+    "payload": {"description": "p95 latency > 2s"}
+  }'
+```
+
+Submit a batch:
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/history/alerts \
+  -H "Content-Type: application/json" \
+  -H 'Idempotency-Key: batch-01' \
+  -d '{
+    "alerts": [
+      {"source": "prometheus", "summary": "HTTP 5xx surge", "payload": {"value": 1}},
+      {"source": "prometheus", "summary": "Disk usage", "payload": {"value": 2}}
+    ]
+  }'
+```
+
+Run the full workflow from UI payload (simulated):
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/test-workflow \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source": "ui-test",
+    "summary": "Checkout latency is above SLO",
+    "payload": {"description": "p95 latency above 2s for 10 minutes"}
+  }'
+```
+
+---
+
+## LLM configuration and dynamic routing
+
+`config/llm_config.json` is mounted to services via `LLM_CONFIG_PATH` and read by runtime.
+
+You can:
+
+- update routing through UI (`/settings`) with `POST /api/config/llm`
+- test provider-route per agent using `POST /api/config/llm/test/{agent}`
+- persist API keys in ignored runtime secrets using `POST /api/config/llm/secrets`
+- check provider readiness with `GET /api/config/llm/secrets`
+
+Example config shape is:
 
 ```json
 {
   "providers": ["openrouter", "llmgateway", "gapgpt"],
   "models": {
     "openrouter": ["meta-llama/llama-3.1-8b-instruct", "qwen/qwen-2.5-72b-instruct"],
-    "llmgateway": ["zai/glm-5.1", "zai/glm-5", "minimax/MiniMax-M2.7", "kimi/kimi-k2.5"],
-    "gapgpt": ["gapgpt-qwen-3.5", "gpt-4o", "gemini-2.5-pro"]
+    "llmgateway": ["zai/glm-5.1"],
+    "gapgpt": ["gapgpt-qwen-3.5"]
   },
   "provider_settings": {
-    "openrouter": {"base_url": "https://openrouter.ai/api/v1", "api_key_env": "OPENROUTER_API_KEY", "default_model": "openai/gpt-4o-mini"},
-    "llmgateway": {"base_url": "https://llm.snapp.tech/v1", "api_key_env": "LLM_GATEWAY_API_KEY", "default_model": "zai/glm-5.1"},
-    "gapgpt": {"base_url": "https://api.gapgpt.app/v1", "api_key_env": "GAPGPT_API_KEY", "default_model": "gapgpt-qwen-3.5"}
+    "openrouter": {
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "default_model": "openai/gpt-4o-mini"
+    }
   },
   "agents": {
     "supervisor": {"provider": "llmgateway", "model": "zai/glm-5.1"},
@@ -97,11 +256,120 @@ Example config:
 }
 ```
 
-The React UI includes an **LLM Settings** page for changing per-agent provider/model selections, editing runtime API keys, saving/reloading config, refreshing current config, and testing each agent route. The **Test Workflow** page accepts raw alert JSON and shows the full workflow result with sanitized LLM traces.
+---
 
-## Security Controls
+## Environment reference (short list)
 
-- Alert ingestion can require `X-SRE-AI-Signature` or `X-Hub-Signature-256` HMAC-SHA256 when `ALERT_WEBHOOK_SECRET` is set.
-- Alert payload size and batch size are capped by `MAX_ALERT_JSON_BYTES` and `MAX_ALERT_BATCH_SIZE`.
-- LLM prompts treat alert payloads as untrusted data and LLM traces only include content previews, not API keys.
-- Request IDs and correlation IDs are propagated across internal HTTP calls and returned in response headers.
+- Database
+  - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
+  - `POSTGRES_HOST`, `POSTGRES_PORT`, `DATABASE_URL` (overrides host/db variables)
+  - pool: `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_RECYCLE_SECONDS`
+- Service ports
+  - `HISTORY_AGENT_PORT`, `REPORT_AGENT_PORT`, `SUPERVISOR_AGENT_PORT`
+  - `NGINX_PORT`, `PROMETHEUS_PORT`, `ALERTMANAGER_PORT`, `NODE_EXPORTER_PORT`, `GRAFANA_PORT`, `JAEGER_UI_PORT`, `JAEGER_AGENT_PORT`
+- URLs
+  - `HISTORY_AGENT_URL`, `REPORT_AGENT_URL`, `SUPERVISOR_AGENT_URL`
+  - `VITE_API_BASE_URL` (defaults to `/api`)
+- Security and ingestion behavior
+  - `ALERT_WEBHOOK_SECRET` (optional webhook signature enforcement)
+  - `MAX_ALERT_JSON_BYTES`, `MAX_ALERT_BATCH_SIZE`
+  - `DEFAULT_SLA_HOURS`, `REOPEN_STALE_AFTER_HOURS`
+- LLM and HTTP
+  - `AI_PROVIDER`, `AI_MODEL`, provider keys/base URLs
+  - `HTTP_TIMEOUT`, `HTTP_MAX_RETRIES`, `HTTP_BACKOFF_SECONDS`
+  - `HTTP_CIRCUIT_BREAKER_THRESHOLD`, `HTTP_CIRCUIT_BREAKER_RESET_SECONDS`
+  - `LLM_CONFIG_PATH`, `LLM_RUNTIME_SECRETS_PATH`
+- Grafana admin
+  - `GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD`
+
+For any non-dev environment, prefer a secret manager over checked-in `.env` values.
+
+---
+
+## Security notes
+
+- If `ALERT_WEBHOOK_SECRET` is set, alert ingestion expects:
+  - `X-SRE-AI-Signature: sha256=<hmac>` or
+  - `X-Hub-Signature-256: sha256=<hmac>`
+- Runtime keys and runtime secrets are never committed by design (`.gitignore` includes `config/llm_runtime_secrets.json`).
+- Request correlation IDs are carried through internal calls for traceability.
+- DB constraints and idempotency keys protect against duplicate event ingestion and duplicate status transitions.
+
+---
+
+## Operations and troubleshooting
+
+- Why the UI loads at `:80` not `:8080`:
+  - Set `NGINX_PORT=80`, restart nginx service, and confirm host firewall allows inbound `80`.
+  - If host still blocks it, expose an internet-facing port on your load balancer or security group.
+- If ports look fine but API/UI still blank:
+  - `docker compose logs -f nginx`
+  - `docker compose exec nginx nginx -T | sed -n '1,240p'` (or inspect `services/nginx/nginx.conf`)
+- If services fail to become healthy:
+  - check DB readiness first (`docker compose logs -f postgres`)
+  - verify migrations exist in `infra/postgres/migrations`
+  - rebuild and restart with `docker compose up -d --build`
+- Full restart and cleanup workflow:
+  - `docker compose down`
+  - `docker compose up -d --build`
+- Data reset for local testing only:
+  - remove `postgres_data` volume and redeploy (this drops state).
+
+---
+
+## Testing
+
+Run lightweight checks used by CI:
+
+```bash
+python -m compileall shared services
+cd services/nginx/ui && npm install && npm run build && cd -
+pytest
+```
+
+Observability validation:
+
+```bash
+docker compose up -d --build
+curl -s http://127.0.0.1:${PROMETHEUS_PORT:-9090}/api/v1/rules | jq '.data.groups[].name'
+curl -s http://127.0.0.1:${PROMETHEUS_PORT:-9090}/api/v1/alerts | jq '.data.alerts | length'
+curl -s http://127.0.0.1:${ALERTMANAGER_PORT:-9093}/api/v1/status
+```
+
+You can also force a fireable alert by temporarily stopping `node-exporter`:
+
+```bash
+docker compose stop node-exporter
+sleep 70
+curl -s http://127.0.0.1:${ALERTMANAGER_PORT:-9093}/api/v2/alerts
+docker compose start node-exporter
+```
+
+---
+
+## CI
+
+- `.github/workflows/ci.yml` runs:
+  - Python compile check
+  - `docker compose config`
+  - UI build check (`npm install && npm run build`)
+
+---
+
+## Notes for local development
+
+- Frontend code lives in `services/nginx/ui/src`.
+- API contracts are tested in `tests/test_frontend_assets.py` and route-level checks.
+- `docker-compose.bluegreen.yml` includes helper service entries for blue/green experimentation.
+- For focused backend debugging, check service logs with `docker compose logs -f <service>`.
+
+---
+
+## References
+
+- `services/history-agent/README.md`
+- `services/report-agent/README.md`
+- `services/supervisor-agent/README.md`
+- `services/nginx/nginx.conf`
+- `infra/postgres/init.sql` and `infra/postgres/migrations/*`
+- `config/llm_config.json`

@@ -1,0 +1,43 @@
+groups:
+  - name: sre-ai-infra
+    interval: 30s
+    rules:
+      - alert: NodeExporterDown
+        expr: up{job="node-exporter"} == 0
+        for: 1m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "Node exporter is unavailable"
+          description: "Prometheus has not been able to scrape node-exporter for more than 1 minute."
+
+      - alert: AIAgentScrapeDown
+        expr: up{job=~"history-agent|report-agent|supervisor-agent"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: application
+        annotations:
+          summary: "One or more SRE-AI services is not reporting metrics"
+          description: "Prometheus scrape target is down for at least 2 minutes: {{ $labels.job }}"
+
+      - alert: AlertmanagerDown
+        expr: up{job="alertmanager"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: observability
+        annotations:
+          summary: "Alertmanager is unavailable"
+          description: "Prometheus can not scrape Alertmanager metrics anymore."
+
+      - alert: HighSystemCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[2m])) * 100) > 85
+        for: 3m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "Host CPU usage above 85%"
+          description: "The host CPU is above 85% for more than 3 minutes on {{ $labels.instance }}."

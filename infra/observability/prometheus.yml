@@ -4,8 +4,16 @@ global:
     cluster: 'sre-ai'
     replica: '{{.ExternalURL}}'
 
+rule_files:
+  - /etc/prometheus/alerts/*.yml
+
 # Basic auth file should be mounted at /etc/prometheus/web-config.yml
 # web.config.file: /etc/prometheus/web-config.yml
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
 
 scrape_configs:
   - job_name: 'history-agent'
@@ -20,3 +28,11 @@ scrape_configs:
     static_configs:
       - targets: ['supervisor-agent:8003']
     metrics_path: /metrics
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          role: host
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']

@@ -1,0 +1,11 @@
+route:
+  group_by:
+    - alertname
+    - severity
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 5m
+  receiver: blackhole
+
+receivers:
+  - name: blackhole
