@@ -11,20 +11,28 @@ GITLAB_TOKEN = os.getenv('GITLAB_TOKEN', '')
 DEFAULT_PROJECT = os.getenv('GITLAB_PROJECT_ID', '')
 
 
-def _client() -> gitlab.Gitlab:
-    return gitlab.Gitlab(GITLAB_URL, private_token=GITLAB_TOKEN or None, timeout=10)
+def _client(gitlab_url: str | None = None, token: str | None = None) -> gitlab.Gitlab:
+    return gitlab.Gitlab(gitlab_url or GITLAB_URL, private_token=(token if token is not None else GITLAB_TOKEN) or None, timeout=10)
 
 
-def _project_identifier(project_id: str | None) -> str:
-    project = project_id or DEFAULT_PROJECT
+def _project_identifier(project_id: str | None, default_project: str | None = None) -> str:
+    project = project_id or default_project or DEFAULT_PROJECT
     if not project:
         raise ValueError('GITLAB_PROJECT_ID is not configured and no project_id was provided')
     return project
 
 
-def recent_changes(project_id: str | None = None, ref: str | None = None, days: int = 7, limit: int = 10) -> dict[str, Any]:
-    project_name = _project_identifier(project_id)
-    client = _client()
+def recent_changes(
+    project_id: str | None = None,
+    ref: str | None = None,
+    days: int = 7,
+    limit: int = 10,
+    gitlab_url: str | None = None,
+    token: str | None = None,
+    default_project: str | None = None,
+) -> dict[str, Any]:
+    project_name = _project_identifier(project_id, default_project)
+    client = _client(gitlab_url=gitlab_url, token=token)
     project = client.projects.get(project_name)
     since = (datetime.now(timezone.utc) - timedelta(days=max(1, days))).isoformat()
 
@@ -36,7 +44,7 @@ def recent_changes(project_id: str | None = None, ref: str | None = None, days: 
 
     return {
         'status': 'ok',
-        'gitlab_url': GITLAB_URL,
+        'gitlab_url': gitlab_url or GITLAB_URL,
         'project_id': project_name,
         'ref': ref,
         'days': days,

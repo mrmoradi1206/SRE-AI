@@ -23,6 +23,9 @@ x-agent-env: &agent-env
   REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
   PROMETHEUS_URL: ${PROMETHEUS_URL:-http://prometheus:9090}
   ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
+  ELASTICSEARCH_INDEX: ${ELASTICSEARCH_INDEX:-logs-*}
+  OBSERVABILITY_INTEGRATIONS_CONFIG_PATH: ${OBSERVABILITY_INTEGRATIONS_CONFIG_PATH:-/app/config/observability_integrations.json}
+  REPO_INTEGRATIONS_CONFIG_PATH: ${REPO_INTEGRATIONS_CONFIG_PATH:-/app/config/repo_integrations.json}
   GITLAB_URL: ${GITLAB_URL:-https://gitlab.com}
   GITLAB_TOKEN: ${GITLAB_TOKEN:-}
   GITLAB_PROJECT_ID: ${GITLAB_PROJECT_ID:-}
@@ -249,6 +252,10 @@ services:
     build:
       context: .
       dockerfile: services/observability-agent/Dockerfile
+    user: root
+    command: >
+      sh -c "chown -R appuser:appuser /app/config &&
+      exec su appuser -c 'cd /app/services/observability-agent && exec uvicorn main:app --host 0.0.0.0 --port 8003'"
     restart: unless-stopped
     env_file:
       - .env
@@ -258,6 +265,8 @@ services:
       SERVICE_PORT: ${OBSERVABILITY_AGENT_INTERNAL_PORT:-8003}
     ports:
       - "${OBSERVABILITY_AGENT_PORT:-8004}:8003"
+    volumes:
+      - ./config:/app/config
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/health', timeout=3)\""]
       interval: 15s
@@ -280,6 +289,10 @@ services:
     build:
       context: .
       dockerfile: services/repo-agent/Dockerfile
+    user: root
+    command: >
+      sh -c "chown -R appuser:appuser /app/config &&
+      exec su appuser -c 'cd /app/services/repo-agent && exec uvicorn main:app --host 0.0.0.0 --port 8004'"
     restart: unless-stopped
     env_file:
       - .env
@@ -289,6 +302,8 @@ services:
       SERVICE_PORT: ${REPO_AGENT_INTERNAL_PORT:-8004}
     ports:
       - "${REPO_AGENT_PORT:-8005}:8004"
+    volumes:
+      - ./config:/app/config
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/health', timeout=3)\""]
       interval: 15s

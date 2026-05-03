@@ -12,3 +12,7 @@ report_integrations.json
 node_modules/
 dist/
 services/nginx/ui/dist/
+config/observability_integrations.json
+config/repo_integrations.json
+observability_integrations.json
+repo_integrations.json

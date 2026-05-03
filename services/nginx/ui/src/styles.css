@@ -1081,3 +1081,9 @@ textarea:focus {
   gap: 0.45rem;
   font-weight: 800;
 }
+
+.integration-split {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}

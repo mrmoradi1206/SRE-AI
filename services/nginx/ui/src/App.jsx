@@ -1213,6 +1213,170 @@ function MattermostIntegration() {
   );
 }
 
+
+function PlatformIntegrationSettings() {
+  const [observability, setObservability] = useState(null);
+  const [repo, setRepo] = useState(null);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const [testResult, setTestResult] = useState(null);
+
+  const load = async () => {
+    setError('');
+    try {
+      const [observabilityConfig, repoConfig] = await Promise.all([
+        apiFetch('/observability/api/v1/config'),
+        apiFetch('/repo/api/v1/config'),
+      ]);
+      setObservability(observabilityConfig);
+      setRepo({ ...repoConfig, gitlab: { ...(repoConfig.gitlab || {}), token: '' } });
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const updateObservability = (section, patch) => {
+    setObservability((current) => ({ ...current, [section]: { ...(current?.[section] || {}), ...patch } }));
+  };
+
+  const updateGitLab = (patch) => {
+    setRepo((current) => ({ ...current, gitlab: { ...(current?.gitlab || {}), ...patch } }));
+  };
+
+  const saveObservability = async () => {
+    setBusy('save-observability');
+    setMessage('');
+    setError('');
+    try {
+      const next = await apiFetch('/observability/api/v1/config', { method: 'PUT', body: JSON.stringify(observability) });
+      setObservability(next);
+      setMessage('Prometheus and Elasticsearch settings saved. New agent tool calls use these values immediately.');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const saveRepo = async () => {
+    setBusy('save-repo');
+    setMessage('');
+    setError('');
+    try {
+      const payload = { gitlab: { ...(repo?.gitlab || {}) } };
+      if (!payload.gitlab.token) {
+        delete payload.gitlab.token;
+      }
+      const next = await apiFetch('/repo/api/v1/config', { method: 'PUT', body: JSON.stringify(payload) });
+      setRepo({ ...next, gitlab: { ...(next.gitlab || {}), token: '' } });
+      setMessage('GitLab settings saved. Repo widgets and supervisor tools use the configured project now.');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const runTest = async (target) => {
+    setBusy(`test-${target}`);
+    setMessage('');
+    setError('');
+    try {
+      const path = target === 'prometheus'
+        ? '/observability/api/v1/test/prometheus'
+        : target === 'elasticsearch'
+          ? '/observability/api/v1/test/elasticsearch'
+          : '/repo/api/v1/test/gitlab';
+      const result = await apiFetch(path, { method: 'POST', body: JSON.stringify({}) });
+      setTestResult({ target, result });
+      setMessage(result.ok ? `${target} connection works.` : `${target} test returned a configuration warning.`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  if (!observability || !repo) {
+    return (
+      <div className="panel span-2">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Data integrations</p>
+            <h3>Loading settings</h3>
+          </div>
+        </div>
+        {error ? <p className="error-text">{error}</p> : <p>Reading agent configuration...</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="panel span-2">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">Data integrations</p>
+          <h3>Connect Prometheus, Elasticsearch, and GitLab</h3>
+        </div>
+        <button type="button" className="ghost-button" disabled={Boolean(busy)} onClick={load}>Reload</button>
+      </div>
+      <p>These settings are stored in the shared config volume and are used by observability-agent, repo-agent, the incident widgets, and the supervisor tools.</p>
+      <div className="secret-grid">
+        <label>
+          Prometheus URL
+          <span className="field-hint">Example: http://prometheus:9090 or http://10.0.0.5:9090</span>
+          <input value={observability.prometheus?.url || ''} onChange={(event) => updateObservability('prometheus', { url: event.target.value })} />
+        </label>
+        <label>
+          Elasticsearch URL
+          <span className="field-hint">Example: http://elasticsearch:9200</span>
+          <input value={observability.elasticsearch?.url || ''} onChange={(event) => updateObservability('elasticsearch', { url: event.target.value })} />
+        </label>
+        <label>
+          Elasticsearch index
+          <span className="field-hint">Use a wildcard if your logs roll by date.</span>
+          <input value={observability.elasticsearch?.index || ''} onChange={(event) => updateObservability('elasticsearch', { index: event.target.value })} />
+        </label>
+      </div>
+      <div className="action-row wrap">
+        <button type="button" disabled={Boolean(busy)} onClick={saveObservability}>{busy === 'save-observability' ? 'Saving...' : 'Save Observability'}</button>
+        <button type="button" className="ghost-button" disabled={Boolean(busy)} onClick={() => runTest('prometheus')}>{busy === 'test-prometheus' ? 'Testing...' : 'Test Prometheus'}</button>
+        <button type="button" className="ghost-button" disabled={Boolean(busy)} onClick={() => runTest('elasticsearch')}>{busy === 'test-elasticsearch' ? 'Testing...' : 'Test Elasticsearch'}</button>
+      </div>
+
+      <div className="secret-grid integration-split">
+        <label>
+          GitLab URL
+          <span className="field-hint">Self-managed or SaaS GitLab base URL.</span>
+          <input value={repo.gitlab?.url || ''} onChange={(event) => updateGitLab({ url: event.target.value })} />
+        </label>
+        <label>
+          GitLab project ID/path
+          <span className="field-hint">Numeric project ID or namespace/project path.</span>
+          <input value={repo.gitlab?.default_project || ''} placeholder="group/project or 123456" onChange={(event) => updateGitLab({ default_project: event.target.value })} />
+        </label>
+        <label>
+          GitLab token
+          <span className="field-hint">{repo.gitlab?.token_configured ? `configured (${repo.gitlab.token_preview})` : 'not configured'}; leave blank to keep existing.</span>
+          <input type="password" value={repo.gitlab?.token || ''} placeholder="glpat-..." onChange={(event) => updateGitLab({ token: event.target.value })} />
+        </label>
+      </div>
+      <div className="action-row wrap">
+        <button type="button" disabled={Boolean(busy)} onClick={saveRepo}>{busy === 'save-repo' ? 'Saving...' : 'Save GitLab'}</button>
+        <button type="button" className="ghost-button" disabled={Boolean(busy)} onClick={() => runTest('gitlab')}>{busy === 'test-gitlab' ? 'Testing...' : 'Test GitLab'}</button>
+      </div>
+      {message ? <p className="success-text">{message}</p> : null}
+      {error ? <p className="error-text">{error}</p> : null}
+      {testResult ? <JsonBlock title={`${testResult.target} test result`} data={testResult.result} /> : null}
+    </div>
+  );
+}
+
 function IntegrationPage() {
   const [host, setHost] = useState(() => window.location.hostname || '<server-ip>');
   const [port, setPort] = useState(() => window.location.port || '8080');
@@ -1377,6 +1541,7 @@ function IntegrationPage() {
       </div>
 
       <MattermostIntegration />
+      <PlatformIntegrationSettings />
     </section>
   );
 }

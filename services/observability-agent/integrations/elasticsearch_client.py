@@ -18,7 +18,7 @@ def _extract_stack_trace(message: str) -> str | None:
     return match.group('stack')[:4000]
 
 
-async def search_error_logs(service: str, minutes: int = 60, index: str = 'logs-*') -> dict[str, Any]:
+async def search_error_logs(service: str, minutes: int = 60, index: str = 'logs-*', elasticsearch_url: str | None = None) -> dict[str, Any]:
     since = (datetime.now(timezone.utc) - timedelta(minutes=max(1, minutes))).isoformat()
     query = {
         'size': 10,
@@ -33,7 +33,8 @@ async def search_error_logs(service: str, minutes: int = 60, index: str = 'logs-
             }
         },
     }
-    url = f'{ELASTICSEARCH_URL.rstrip("/")}/{index}/_search'
+    base_url = (elasticsearch_url or ELASTICSEARCH_URL).rstrip('/')
+    url = f'{base_url}/{index}/_search'
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.post(url, json=query)
     response.raise_for_status()
@@ -50,4 +51,4 @@ async def search_error_logs(service: str, minutes: int = 60, index: str = 'logs-
             'stack_trace': _extract_stack_trace(message),
             'index': hit.get('_index'),
         })
-    return {'status': 'ok', 'service': service, 'minutes': minutes, 'entries': entries, 'raw_total': data.get('hits', {}).get('total')}
+    return {'status': 'ok', 'service': service, 'minutes': minutes, 'index': index, 'entries': entries, 'raw_total': data.get('hits', {}).get('total')}

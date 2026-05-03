@@ -280,9 +280,16 @@ All frontend/API traffic is served through one listener, prefixed by `/api`:
   - `POST /api/test-workflow`
 - Observability and repo integrations
   - `GET /api/observability/health`
+  - `GET /api/observability/api/v1/config`
+  - `PUT /api/observability/api/v1/config`
+  - `POST /api/observability/api/v1/test/prometheus`
+  - `POST /api/observability/api/v1/test/elasticsearch`
   - `POST /api/observability/api/v1/metrics/query`
   - `GET /api/observability/api/v1/logs/errors?service=<service>&minutes=60`
   - `GET /api/repo/health`
+  - `GET /api/repo/api/v1/config`
+  - `PUT /api/repo/api/v1/config`
+  - `POST /api/repo/api/v1/test/gitlab`
   - `GET /api/repo/api/v1/repo/changes`
 
 ### ReAct trace and integration UI
@@ -293,6 +300,7 @@ All frontend/API traffic is served through one listener, prefixed by `/api`:
 - The incident detail page polls this trace every 3 seconds while the incident status is `investigating`.
 - The incident detail page also includes widgets for PromQL results, Elasticsearch error logs/stack traces, and recent GitLab commits/MRs.
 - Human SREs can click **Approve & Learn** to edit the final root cause/resolution and save it to `incident_knowledge` for future retrieval.
+- The `/integrations` page lets operators set Prometheus URL, Elasticsearch URL/index, GitLab URL/token/project, and run connection tests without rebuilding containers. These values are saved under `config/observability_integrations.json` and `config/repo_integrations.json` on the mounted config volume.
 
 ---
 
@@ -374,6 +382,15 @@ Connect Mattermost report delivery:
 4. Use **Send Mattermost Test** to verify the webhook.
 
 When enabled, every newly generated report is posted by `report-agent` to Mattermost. Report storage does not depend on Mattermost availability; delivery failures are written to the dead-letter queue as `report.deliver_mattermost`.
+
+Connect data sources for agent tools and incident widgets:
+
+1. Open `http://<server-ip>:8080/integrations`.
+2. In **Data integrations**, set `Prometheus URL`, `Elasticsearch URL`, and `Elasticsearch index`, then click **Save Observability**.
+3. Set `GitLab URL`, `GitLab project ID/path`, and optionally a GitLab token, then click **Save GitLab**. Leave the token field blank on later saves to keep the existing token.
+4. Use **Test Prometheus**, **Test Elasticsearch**, and **Test GitLab** to verify connectivity. A failed test returns a structured warning in the UI instead of crashing the agent.
+
+The incident detail page uses these settings when fetching PromQL samples, recent error logs/stack traces, and recent GitLab commits/MRs. The supervisor's real ReAct tools also use the same observability-agent and repo-agent endpoints.
 
 ---
 
