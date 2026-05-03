@@ -4,6 +4,7 @@ from pathlib import Path
 
 from aiops_shared.context_loader import normalize_incident_bundle
 from aiops_shared.llm_client import run_llm
+from aiops_shared.llm_config import get_agent_system_prompt
 from jinja2 import Template
 
 TEMPLATE_PATH = Path(__file__).resolve().parent.parent / 'templates' / 'report.md.j2'
@@ -32,7 +33,7 @@ class ReportFormatter:
                 provider,
                 model,
                 [
-                    {'role': 'system', 'content': 'Create a concise SRE incident report in markdown. Include impact, likely cause, timeline, actions, and follow-ups.'},
+                    {'role': 'system', 'content': get_agent_system_prompt('report')},
                     {'role': 'user', 'content': baseline},
                 ],
                 temperature=0.1,

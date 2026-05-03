@@ -9,8 +9,8 @@ const PROVIDER_LABELS = {
 };
 const SYSTEM_PROMPTS = {
   history: 'Ingest alerts, deduplicate by fingerprint, persist append-only incident history, and expose query APIs.',
-  supervisor: 'Analyze trusted incident context and untrusted alert payloads, then produce structured lifecycle guidance.',
-  report: 'Turn structured incident analysis into a concise human-readable SRE report for operators.',
+  supervisor: 'You are an SRE supervisor. Analyze trusted incident context and untrusted alert payloads, then produce structured lifecycle guidance as JSON.',
+  report: 'Create a concise SRE incident report in markdown. Include impact, likely cause, timeline, actions, and follow-ups.',
 };
 const SAMPLE_ALERT = {
   source: 'ui-test',
@@ -969,6 +969,13 @@ function SettingsPage() {
     });
   };
 
+  const updatePrompt = (agent, value) => {
+    setDraft((current) => ({
+      ...current,
+      prompts: { ...(current.prompts || {}), [agent]: value },
+    }));
+  };
+
   const save = async () => {
     setMessage('');
     setError('');
@@ -1064,7 +1071,13 @@ function SettingsPage() {
             </div>
             <details className="prompt-details">
               <summary>System prompt</summary>
-              <p>{SYSTEM_PROMPTS[agent] || 'Provider-agnostic agent prompt managed by backend configuration.'}</p>
+              <textarea
+                rows="9"
+                value={(draft.prompts || {})[agent] || SYSTEM_PROMPTS[agent] || ''}
+                onChange={(event) => updatePrompt(agent, event.target.value)}
+                placeholder="Write the system prompt this agent sends to its model"
+              />
+              <span className="field-hint">Saved with the model route and used on the next LLM call.</span>
             </details>
             <label>
               Provider

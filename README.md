@@ -287,9 +287,15 @@ Example config shape is:
   "agents": {
     "supervisor": {"provider": "llmgateway", "model": "zai/glm-5.1"},
     "report": {"provider": "openrouter", "model": "meta-llama/llama-3.1-8b-instruct"}
+  },
+  "prompts": {
+    "supervisor": "You are an SRE supervisor...",
+    "report": "Create a concise SRE incident report in markdown..."
   }
 }
 ```
+
+The `/settings` UI can edit both the provider/model route and each LLM-backed agent system prompt. Prompt changes are saved to `config/llm_config.json` and take effect on the next LLM call without rebuilding containers.
 
 There is no history model setting by design. `history-agent` is deterministic and does not call an LLM; it verifies webhooks, deduplicates alerts, persists the append-only timeline, and serves incident context. Only `supervisor-agent` and `report-agent` use model routing.
 

@@ -801,6 +801,11 @@ textarea:focus {
   padding: 0.85rem 1rem;
 }
 
+.prompt-details textarea {
+  margin-top: 0.8rem;
+  min-height: 12rem;
+}
+
 .prompt-details summary {
   cursor: pointer;
   font-weight: 900;
