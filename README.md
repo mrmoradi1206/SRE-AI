@@ -353,13 +353,14 @@ Connect Alertmanager by IP and port:
 
 1. Open `http://<server-ip>:8080/integrations`.
 2. Enter the public IP/DNS and port that Alertmanager can reach.
-3. Copy the generated webhook URL, usually:
+3. Click **Submit Endpoint Changes**. The UI saves this endpoint in browser storage and rebuilds the URL, YAML, and curl examples from the submitted values.
+4. Copy the generated webhook URL, usually:
 
 ```text
 http://<server-ip>:8080/api/alertmanager/webhook
 ```
 
-4. Add it to Alertmanager:
+5. Add it to Alertmanager:
 
 ```yaml
 receivers:

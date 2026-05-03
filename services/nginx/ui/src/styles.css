@@ -1087,3 +1087,105 @@ textarea:focus {
   padding-top: 1.25rem;
   border-top: 1px solid var(--border);
 }
+
+.integrations-page {
+  align-items: start;
+}
+
+.integrations-hero {
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 82% 18%, rgba(241, 182, 99, 0.24), transparent 16rem),
+    linear-gradient(135deg, #0d332d 0%, #13594c 48%, #c5772a 100%);
+}
+
+.alertmanager-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.alertmanager-card::after {
+  content: "";
+  position: absolute;
+  right: -4rem;
+  top: -5rem;
+  width: 16rem;
+  height: 16rem;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(14, 107, 92, 0.18), transparent 68%);
+  pointer-events: none;
+}
+
+.integration-form-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 0.7fr 1.5fr 0.8fr 1.3fr;
+  gap: 1rem;
+  align-items: end;
+}
+
+.integration-form-grid label {
+  display: grid;
+  gap: 0.45rem;
+  font-weight: 900;
+}
+
+.endpoint-preview {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 0.35rem;
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid rgba(14, 107, 92, 0.28);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(135deg, rgba(14, 107, 92, 0.12), rgba(241, 182, 99, 0.1)),
+    rgba(255, 255, 255, 0.55);
+}
+
+.endpoint-preview span {
+  color: var(--muted);
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.74rem;
+}
+
+.endpoint-preview code {
+  color: var(--accent-strong);
+  font: 0.95rem/1.5 "Cascadia Mono", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-weight: 900;
+  word-break: break-all;
+}
+
+.integrations-page .integration-card {
+  border-top: 5px solid rgba(14, 107, 92, 0.34);
+}
+
+.integrations-page .integration-card:nth-of-type(4n) {
+  border-top-color: rgba(167, 101, 18, 0.38);
+}
+
+.integrations-page .panel pre {
+  max-height: 420px;
+}
+
+:root[data-theme="dark"] .endpoint-preview {
+  background:
+    linear-gradient(135deg, rgba(117, 216, 188, 0.1), rgba(241, 182, 99, 0.1)),
+    rgba(255, 255, 255, 0.055);
+}
+
+@media (max-width: 1100px) {
+  .integration-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .integration-form-grid {
+    grid-template-columns: 1fr;
+  }
+}

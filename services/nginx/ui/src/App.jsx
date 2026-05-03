@@ -1379,24 +1379,37 @@ function PlatformIntegrationSettings() {
   );
 }
 
-function IntegrationPage() {
-  const [host, setHost] = useState(() => window.location.hostname || '<server-ip>');
-  const [port, setPort] = useState(() => window.location.port || '8080');
-  const [scheme, setScheme] = useState(() => window.location.protocol.replace(':', '') || 'http');
-  const [secret, setSecret] = useState('');
-  const [message, setMessage] = useState('');
+function AlertmanagerConnection() {
+  const stored = (() => {
+    try {
+      return JSON.parse(window.localStorage.getItem('sre-ai-alertmanager-endpoint') || '{}');
+    } catch (_) {
+      return {};
+    }
+  })();
+  const [draft, setDraft] = useState(() => ({
+    scheme: stored.scheme || window.location.protocol.replace(':', '') || 'http',
+    host: stored.host || window.location.hostname || '<server-ip>',
+    port: stored.port ?? (window.location.port || '8080'),
+    secret: stored.secret || '',
+  }));
+  const [saved, setSaved] = useState(() => ({ ...draft }));
+  const [message, setMessage] = useState(stored.host ? 'Saved endpoint loaded from this browser.' : '');
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState('');
 
-  const baseUrl = `${scheme}://${host}${port ? `:${port}` : ''}`;
-  const webhookUrl = `${baseUrl}/api/alertmanager/webhook`;
+  const update = (patch) => setDraft((current) => ({ ...current, ...patch }));
+  const endpoint = (values) => `${values.scheme}://${values.host}${values.port ? `:${values.port}` : ''}`;
+  const webhookUrl = `${endpoint(saved)}/api/alertmanager/webhook`;
+  const draftWebhookUrl = `${endpoint(draft)}/api/alertmanager/webhook`;
+  const hasUnsavedChanges = JSON.stringify(draft) !== JSON.stringify(saved);
   const composeReceiver = `receivers:
   - name: sre-ai
     webhook_configs:
       - url: '${webhookUrl}'
-        send_resolved: true${secret ? `\n        http_config:\n          authorization:\n            type: Bearer\n            credentials: '${secret}'` : ''}`;
+        send_resolved: true${saved.secret ? `\n        http_config:\n          authorization:\n            type: Bearer\n            credentials: '${saved.secret}'` : ''}`;
   const curlCommand = `curl -X POST '${webhookUrl}' \\
-  -H 'Content-Type: application/json'${secret ? ` \\\n  -H 'Authorization: Bearer ${secret}'` : ''} \\
+  -H 'Content-Type: application/json'${saved.secret ? ` \\\n  -H 'Authorization: Bearer ${saved.secret}'` : ''} \\
   -d '{
     "receiver": "sre-ai",
     "status": "firing",
@@ -1422,8 +1435,43 @@ function IntegrationPage() {
     "commonAnnotations": {"summary": "Synthetic Alertmanager alert"}
   }'`;
 
+  const saveEndpoint = () => {
+    setError('');
+    if (!draft.host || draft.host === '<server-ip>') {
+      setError('Enter the server IP or DNS name that Alertmanager can reach.');
+      return;
+    }
+    const next = { ...draft, port: String(draft.port || '').trim() };
+    window.localStorage.setItem('sre-ai-alertmanager-endpoint', JSON.stringify(next));
+    setSaved(next);
+    setDraft(next);
+    setMessage('Alertmanager endpoint saved. YAML and curl examples now use the submitted IP/port.');
+  };
+
+  const copyText = async (text, label) => {
+    setError('');
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setMessage(`${label} copied.`);
+    } catch (err) {
+      setError(`Copy failed: ${err.message}`);
+    }
+  };
+
   const sendTest = async () => {
-    setBusy(true);
+    setBusy('test');
     setMessage('');
     setError('');
     try {
@@ -1448,100 +1496,112 @@ function IntegrationPage() {
       };
       const result = await fetch('/api/alertmanager/webhook', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(secret ? { Authorization: `Bearer ${secret}` } : {}) },
+        headers: { 'Content-Type': 'application/json', ...(saved.secret ? { Authorization: `Bearer ${saved.secret}` } : {}) },
         body: JSON.stringify(payload),
       });
       if (!result.ok) {
         throw new Error(await result.text());
       }
-      setMessage('Test alert accepted. The history agent ingested it and queued the full workflow.');
+      setMessage('Test alert accepted. History ingested it and queued the full workflow.');
     } catch (err) {
       setError(err.message);
     } finally {
-      setBusy(false);
+      setBusy('');
     }
   };
 
   return (
-    <section className="page-grid">
-      <div className="hero-card span-2">
-        <div className="hero-copy">
-          <p className="eyebrow">Alertmanager integration</p>
-          <h3>Connect by IP and port</h3>
-          <p>
-            Point Alertmanager at this webhook. Firing alerts are ingested by History, then Supervisor analysis and
-            Report generation run automatically. Resolved notifications mark the matching incident resolved.
-          </p>
-        </div>
-        <WorkflowRail trace={[
-          { name: 'history.ingest', status: 'ok' },
-          { name: 'history.context', status: 'ok' },
-          { name: 'supervisor.analyze', status: 'ok' },
-          { name: 'report.generate', status: 'ok' },
-        ]} />
-      </div>
-
-      <div className="panel">
+    <>
+      <div className="panel integration-card span-2 alertmanager-card">
         <div className="panel-header">
           <div>
-            <p className="eyebrow">Public endpoint</p>
-            <h3>Webhook URL builder</h3>
+            <p className="eyebrow">Alertmanager</p>
+            <h3>Public webhook endpoint</h3>
           </div>
+          <StatusChip status={hasUnsavedChanges ? 'open' : 'resolved'} />
         </div>
-        <div className="secret-grid">
+        <p>Set the IP/DNS and port that your Alertmanager server can reach, then submit the change. The generated URL, YAML, and curl test are rebuilt from the saved endpoint.</p>
+        <div className="integration-form-grid">
           <label>
             Scheme
-            <select value={scheme} onChange={(event) => setScheme(event.target.value)}>
+            <select value={draft.scheme} onChange={(event) => update({ scheme: event.target.value })}>
               <option value="http">http</option>
               <option value="https">https</option>
             </select>
           </label>
           <label>
             Server IP / DNS
-            <input value={host} onChange={(event) => setHost(event.target.value)} placeholder="192.0.2.10" />
+            <input value={draft.host} onChange={(event) => update({ host: event.target.value.trim() })} placeholder="192.0.2.10 or sre.example.com" />
           </label>
           <label>
             UI/API port
-            <input value={port} onChange={(event) => setPort(event.target.value)} placeholder="8080 or 80" />
+            <input value={draft.port} onChange={(event) => update({ port: event.target.value.trim() })} placeholder="8080, 80, or blank behind HTTPS" />
           </label>
           <label>
             Optional bearer token
-            <input type="password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="Only if you protect nginx upstream" />
+            <input type="password" value={draft.secret} onChange={(event) => update({ secret: event.target.value })} placeholder="Only if you protect the webhook" />
           </label>
         </div>
-        <div className="copy-card">
-          <span className="field-hint">Use this in Alertmanager</span>
-          <code>{webhookUrl}</code>
+        <div className="endpoint-preview">
+          <span>{hasUnsavedChanges ? 'Draft URL' : 'Saved URL'}</span>
+          <code>{hasUnsavedChanges ? draftWebhookUrl : webhookUrl}</code>
         </div>
         <div className="action-row wrap">
-          <button type="button" disabled={busy} onClick={sendTest}>{busy ? 'Sending...' : 'Send Test Alert'}</button>
+          <button type="button" onClick={saveEndpoint}>{hasUnsavedChanges ? 'Submit Endpoint Changes' : 'Endpoint Saved'}</button>
+          <button type="button" className="ghost-button" onClick={() => copyText(webhookUrl, 'Webhook URL')}>Copy saved URL</button>
+          <button type="button" className="ghost-button" disabled={Boolean(busy)} onClick={sendTest}>{busy === 'test' ? 'Sending...' : 'Send Test Alert'}</button>
           <Link className="ghost-button" to="/incidents">Open incidents</Link>
         </div>
         {message ? <p className="success-text">{message}</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
       </div>
 
-      <div className="panel">
+      <div className="panel integration-card">
         <div className="panel-header">
           <div>
             <p className="eyebrow">Alertmanager YAML</p>
             <h3>Receiver snippet</h3>
           </div>
+          <button type="button" className="ghost-button" onClick={() => copyText(composeReceiver, 'Receiver YAML')}>Copy YAML</button>
         </div>
-        <p>Add this receiver to Alertmanager and route alerts to `sre-ai`. Keep `send_resolved: true` so SRE-AI can close incidents when Alertmanager resolves them.</p>
+        <p>Route firing and resolved notifications to `sre-ai`. Keep `send_resolved: true` so SRE-AI closes incidents when Alertmanager resolves them.</p>
         <pre>{composeReceiver}</pre>
       </div>
 
-      <div className="panel span-2">
+      <div className="panel integration-card">
         <div className="panel-header">
           <div>
             <p className="eyebrow">Manual check</p>
             <h3>curl test</h3>
           </div>
+          <button type="button" className="ghost-button" onClick={() => copyText(curlCommand, 'curl command')}>Copy curl</button>
         </div>
         <pre>{curlCommand}</pre>
       </div>
+    </>
+  );
+}
 
+function IntegrationPage() {
+  return (
+    <section className="page-grid integrations-page">
+      <div className="hero-card span-2 integrations-hero">
+        <div className="hero-copy">
+          <p className="eyebrow">Integrations</p>
+          <h3>Connect the whole incident loop</h3>
+          <p>
+            Configure ingress, chat delivery, observability data, and source-control context from one place. Saved settings are used by the agents immediately where backend config exists.
+          </p>
+        </div>
+        <WorkflowRail trace={[
+          { name: 'alertmanager.webhook', status: 'ok' },
+          { name: 'observability.think', status: 'ok' },
+          { name: 'repo.think', status: 'ok' },
+          { name: 'mattermost.report', status: 'ok' },
+        ]} />
+      </div>
+
+      <AlertmanagerConnection />
       <MattermostIntegration />
       <PlatformIntegrationSettings />
     </section>
