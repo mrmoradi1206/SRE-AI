@@ -124,6 +124,82 @@ docker compose port nginx 80
 
 ---
 
+## Request flow
+
+All browser and webhook traffic enters through `nginx` on `NGINX_PORT` (`8080` by default). Nginx serves the React UI and forwards `/api/*` requests to the correct agent.
+
+```text
+Browser / Alertmanager
+        |
+        v
+nginx :8080
+        |
+        +--> React UI routes: /, /incidents, /workflow, /integrations, /settings
+        |
+        +--> /api/history/* and /api/alertmanager/webhook
+        |       |
+        |       v
+        |   history-agent :8001
+        |       - validates incoming webhooks
+        |       - deduplicates alerts by fingerprint/grouping key
+        |       - opens or reuses incidents
+        |       - appends immutable history events
+        |       - queues supervisor.analyze jobs
+        |
+        +--> /api/supervisor/*, /api/config/*, /api/test-workflow
+        |       |
+        |       v
+        |   supervisor-agent :8003
+        |       - loads incident context from history-agent
+        |       - calls the configured LLM with the editable system prompt
+        |       - records recommended actions and safe lifecycle transitions
+        |       - calls report-agent after queued analysis
+        |
+        +--> /api/report/*
+                |
+                v
+            report-agent :8002
+                - loads incident context from history-agent
+                - calls the configured LLM with the editable report prompt
+                - stores report.report_generated events
+                - optionally sends reports to Mattermost
+```
+
+Automatic Alertmanager path:
+
+```text
+Alertmanager firing alert
+  -> POST /api/alertmanager/webhook
+  -> history-agent stores alert + incident events
+  -> event queue creates supervisor.analyze
+  -> supervisor-agent analyzes the incident
+  -> report-agent generates the report
+  -> Mattermost delivery runs if enabled
+```
+
+Manual operator path:
+
+```text
+Operator opens UI
+  -> nginx serves React app
+  -> UI calls /api/history/dashboard and incident APIs
+  -> operator can run /workflow, change LLM routes/prompts in /settings,
+     connect Alertmanager/Mattermost in /integrations, or trigger reports manually.
+```
+
+Data persistence path:
+
+```text
+agents -> postgres
+  - alerts table stores raw normalized alert payloads
+  - incidents table stores current projection/state
+  - incident_events stores append-only event history
+  - event_queue stores async supervisor work
+  - dead_letter_queue stores failed retryable operations
+```
+
+---
+
 ## Service endpoints
 
 ### Exposed by compose (host ports)
