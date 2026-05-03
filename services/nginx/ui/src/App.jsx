@@ -846,6 +846,7 @@ function MattermostIntegration() {
         </label>
         <label>
           Channel override
+          <span className="field-hint">Optional channel name; leave blank for the webhook default channel.</span>
           <input value={draft.channel} placeholder="town-square or @username" onChange={(event) => update({ channel: event.target.value })} />
         </label>
         <label>

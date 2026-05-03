@@ -152,5 +152,9 @@ async def send_report_to_mattermost(report_text: str, incident_bundle: dict[str,
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(webhook_url, json=payload)
     if response.status_code >= 400:
-        raise MattermostDeliveryError(f'Mattermost returned HTTP {response.status_code}: {response.text[:300]}')
+        detail = response.text[:300]
+        channel_hint = ''
+        if config.get('channel') and ('channel.app_error' in detail or response.status_code == 404):
+            channel_hint = ' Channel override must be a channel name such as town-square, not a channel ID; leave it blank to use the webhook default channel.'
+        raise MattermostDeliveryError(f'Mattermost returned HTTP {response.status_code}: {detail}{channel_hint}')
     return {'enabled': True, 'sent': True, 'status_code': response.status_code, 'channel': config.get('channel') or None}
