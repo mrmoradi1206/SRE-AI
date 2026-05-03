@@ -31,13 +31,13 @@ const NAV_ITEMS = [
   { to: '/incidents', label: 'Incidents', hint: 'Triage queue' },
   { to: '/workflow', label: 'Test Workflow', hint: 'End-to-end drill' },
   { to: '/integrations', label: 'Integrations', hint: 'Alertmanager webhook' },
-  { to: '/agents', label: 'Agents', hint: 'Service readiness' },
+  { to: '/agents', label: 'Agents', hint: 'Compose health' },
   { to: '/settings', label: 'LLM Settings', hint: 'Model routing' },
 ];
 const OPS_SIGNALS = [
   ['99.95%', 'target SLO'],
   ['< 4h', 'default SLA'],
-  ['3', 'AI agents'],
+  ['6+', 'service nodes'],
 ];
 
 async function apiFetch(path, options = {}) {
@@ -82,6 +82,161 @@ function JsonBlock({ data, title = 'JSON' }) {
       <summary>{title}</summary>
       <pre>{typeof data === 'string' ? data : JSON.stringify(data, null, 2)}</pre>
     </details>
+  );
+}
+
+
+function safeJson(value) {
+  try {
+    return typeof value === 'string' ? JSON.parse(value) : value;
+  } catch {
+    return value;
+  }
+}
+
+function incidentServiceName(incident) {
+  const alert = incident?.alerts?.[0];
+  const labels = alert?.payload?.labels || {};
+  return labels.service || labels.job || labels.app || labels.alertname || incident?.summary || '';
+}
+
+function ReActTracePanel({ trace, loading }) {
+  const steps = trace?.steps || [];
+  return (
+    <div className="panel span-2 cot-panel">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">Supervisor ReAct</p>
+          <h3>Chain of Thought Trace</h3>
+        </div>
+        <span className="count-pill">{loading ? 'polling' : `${steps.length} steps`}</span>
+      </div>
+      {!steps.length ? (
+        <EmptyState title="No ReAct steps yet" copy="Ask Supervisor or wait while an investigating incident is analyzed." />
+      ) : (
+        <div className="cot-list">
+          {steps.map((step, index) => (
+            <article key={`${step.iteration || index}-${index}`} className="cot-step">
+              <div className="cot-step-header">
+                <span className="count-pill">Iteration {step.iteration || index + 1}</span>
+                {step.final ? <StatusChip status="resolved" /> : <StatusChip status="investigating" />}
+              </div>
+              {step.thought ? (
+                <div className="cot-thought">
+                  <strong>Thought</strong>
+                  <p>{step.thought}</p>
+                </div>
+              ) : null}
+              {step.action ? (
+                <div className="cot-action">
+                  <strong>Action</strong>
+                  <span className="tool-badge">{step.action.name || 'tool'}</span>
+                  {step.action.input ? <code>{typeof step.action.input === 'string' ? step.action.input : JSON.stringify(step.action.input)}</code> : null}
+                </div>
+              ) : null}
+              {step.observation ? (
+                <div className="cot-observation">
+                  <strong>Observation</strong>
+                  <pre>{JSON.stringify(safeJson(step.observation), null, 2)}</pre>
+                </div>
+              ) : null}
+              {step.final ? <JsonBlock title="Final decision" data={step.final} /> : null}
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IncidentIntegrationsPanel({ incident }) {
+  const serviceName = incidentServiceName(incident);
+  const [query, setQuery] = useState(serviceName ? `up{job=~"${serviceName}.*"}` : 'up');
+  const [projectId, setProjectId] = useState('');
+  const [metrics, setMetrics] = useState(null);
+  const [logs, setLogs] = useState(null);
+  const [repo, setRepo] = useState(null);
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setQuery(serviceName ? `up{job=~"${serviceName}.*"}` : 'up');
+  }, [serviceName]);
+
+  const loadMetrics = async () => {
+    setBusy('metrics');
+    setError('');
+    try {
+      setMetrics(await apiFetch('/observability/api/v1/metrics/query', { method: 'POST', body: JSON.stringify({ incident_id: incident.id, query }) }));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const loadLogs = async () => {
+    setBusy('logs');
+    setError('');
+    try {
+      const params = new URLSearchParams({ service: serviceName, minutes: '60' });
+      setLogs(await apiFetch(`/observability/api/v1/logs/errors?${params.toString()}`));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const loadRepo = async () => {
+    setBusy('repo');
+    setError('');
+    try {
+      const params = new URLSearchParams({ days: '7', limit: '10' });
+      if (projectId) params.set('project_id', projectId);
+      setRepo(await apiFetch(`/repo/api/v1/repo/changes?${params.toString()}`));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  return (
+    <div className="panel span-2">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">Live integrations</p>
+          <h3>Metrics, logs, and repo changes</h3>
+        </div>
+        <span className="count-pill">{serviceName || 'service unknown'}</span>
+      </div>
+      <div className="integration-grid">
+        <div className="copy-card integration-card">
+          <label>
+            PromQL
+            <input value={query} onChange={(event) => setQuery(event.target.value)} />
+          </label>
+          <button type="button" disabled={busy === 'metrics'} onClick={loadMetrics}>{busy === 'metrics' ? 'Querying...' : 'Query Prometheus'}</button>
+          {metrics ? <JsonBlock title="Prometheus result" data={metrics.data || metrics} /> : null}
+        </div>
+        <div className="copy-card integration-card">
+          <p><strong>Elasticsearch errors</strong></p>
+          <p>Searches recent ERROR, Exception, and Traceback logs for the detected service.</p>
+          <button type="button" disabled={busy === 'logs' || !serviceName} onClick={loadLogs}>{busy === 'logs' ? 'Searching...' : 'Search recent errors'}</button>
+          {logs ? <JsonBlock title="Error logs" data={logs.entries || logs} /> : null}
+        </div>
+        <div className="copy-card integration-card">
+          <label>
+            GitLab project ID/path
+            <input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="group/project or numeric ID" />
+          </label>
+          <button type="button" disabled={busy === 'repo'} onClick={loadRepo}>{busy === 'repo' ? 'Loading...' : 'Fetch GitLab changes'}</button>
+          {repo ? <JsonBlock title="Recent commits and MRs" data={repo} /> : null}
+        </div>
+      </div>
+      {error ? <p className="error-text">{error}</p> : null}
+    </div>
   );
 }
 
@@ -391,6 +546,8 @@ function IncidentDetailPage() {
   const [incident, setIncident] = useState(null);
   const [report, setReport] = useState(null);
   const [workflowSummary, setWorkflowSummary] = useState(null);
+  const [reactTrace, setReactTrace] = useState(null);
+  const [traceLoading, setTraceLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -411,6 +568,12 @@ function IncidentDetailPage() {
       } catch {
         setWorkflowSummary(null);
       }
+      try {
+        const trace = await apiFetch(`/supervisor/incidents/${incidentId}/trace`);
+        setReactTrace(trace);
+      } catch {
+        setReactTrace(null);
+      }
     } catch (err) {
       setError(err.message);
     }
@@ -419,6 +582,28 @@ function IncidentDetailPage() {
   useEffect(() => {
     load();
   }, [incidentId]);
+
+  useEffect(() => {
+    if (!incident || incident.status !== 'investigating') return undefined;
+    let cancelled = false;
+    const refreshTrace = async () => {
+      setTraceLoading(true);
+      try {
+        const trace = await apiFetch(`/supervisor/incidents/${incidentId}/trace`);
+        if (!cancelled) setReactTrace(trace);
+      } catch {
+        // Keep the latest successful trace visible while polling.
+      } finally {
+        if (!cancelled) setTraceLoading(false);
+      }
+    };
+    refreshTrace();
+    const timer = window.setInterval(refreshTrace, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [incident?.status, incidentId]);
 
   const act = async (path, body) => {
     setBusy(true);
@@ -512,6 +697,10 @@ function IncidentDetailPage() {
         {message ? <pre>{message}</pre> : null}
         {error ? <p className="error-text">{error}</p> : null}
       </div>
+
+      <ReActTracePanel trace={reactTrace} loading={traceLoading} />
+
+      <IncidentIntegrationsPanel incident={incident} />
 
       <div className="panel">
         <div className="panel-header">
@@ -712,38 +901,81 @@ function WorkflowTestPage() {
 function AgentsPage() {
   const [health, setHealth] = useState([]);
   const [error, setError] = useState('');
+  const nodes = [
+    { name: 'history-agent', path: '/history/health', json: true },
+    { name: 'report-agent', path: '/report/health', json: true },
+    { name: 'supervisor-agent', path: '/supervisor/health', json: true },
+    { name: 'observability-agent', path: '/observability/health', json: true },
+    { name: 'repo-agent', path: '/repo/health', json: true },
+    { name: 'prometheus', path: '/nodes/prometheus/health', json: false },
+    { name: 'alertmanager', path: '/nodes/alertmanager/health', json: false },
+    { name: 'grafana', path: '/nodes/grafana/health', json: true },
+    { name: 'node-exporter', path: '/nodes/node-exporter/metrics', json: false },
+  ];
+
+  const loadHealth = async () => {
+    setError('');
+    const results = await Promise.all(nodes.map(async (node) => {
+      try {
+        const response = await fetch(`${API_BASE}${node.path}`);
+        const body = node.json ? await response.json() : await response.text();
+        return {
+          service: node.name,
+          status: response.ok ? 'ok' : 'failed',
+          readiness: response.ok ? 'ready' : `http ${response.status}`,
+          database: body?.database || 'n/a',
+          detail: typeof body === 'string' ? body.slice(0, 180) : body,
+          timestamp: body?.timestamp || new Date().toISOString(),
+        };
+      } catch (err) {
+        return { service: node.name, status: 'failed', readiness: err.message, database: 'n/a', detail: err.message, timestamp: new Date().toISOString() };
+      }
+    }));
+    setHealth(results);
+  };
 
   useEffect(() => {
-    Promise.all([apiFetch('/history/health'), apiFetch('/report/health'), apiFetch('/supervisor/health')])
-      .then((results) => setHealth(results))
-      .catch((err) => setError(err.message));
+    loadHealth().catch((err) => setError(err.message));
+    const timer = window.setInterval(() => loadHealth().catch((err) => setError(err.message)), 10000);
+    return () => window.clearInterval(timer);
   }, []);
+
+  const okCount = health.filter((item) => item.status === 'ok').length;
 
   return (
     <section className="page-grid">
       <div className="hero-card span-2">
         <div className="hero-copy">
           <p className="eyebrow">Fleet readiness</p>
-          <h3>Agent health</h3>
-          <p>Every agent exposes health and readiness endpoints through the nginx API facade for quick operator verification.</p>
+          <h3>Docker compose node health</h3>
+          <p>Health checks cover app agents plus Prometheus, Alertmanager, Grafana, Redis-backed ReAct memory dependencies, and node-exporter reachability.</p>
         </div>
         <div className="ops-strip">
-          <span><strong>{health.length || '--'}</strong><small>responses</small></span>
-          <span><strong>{error ? 'degraded' : 'normal'}</strong><small>view state</small></span>
+          <span><strong>{okCount}/{health.length || nodes.length}</strong><small>healthy</small></span>
+          <span><strong>{error ? 'degraded' : 'polling'}</strong><small>10s refresh</small></span>
         </div>
       </div>
       {error ? <p className="error-text">{error}</p> : null}
       <div className="health-grid span-2">
         {health.map((item) => (
           <article key={item.service} className="health-card">
-            <p className="eyebrow">{item.service}</p>
-            <h4>{item.status}</h4>
+            <div className="panel-header compact">
+              <div>
+                <p className="eyebrow">{item.service}</p>
+                <h4>{item.status}</h4>
+              </div>
+              <StatusChip status={item.status} />
+            </div>
             <p>Database: {item.database}</p>
             <p>Readiness: {item.readiness}</p>
-            <p>{item.timestamp}</p>
+            <p>{formatDate(item.timestamp)}</p>
+            <details className="json-viewer">
+              <summary>Raw detail</summary>
+              <pre>{typeof item.detail === 'string' ? item.detail : JSON.stringify(item.detail, null, 2)}</pre>
+            </details>
           </article>
         ))}
-        {!health.length && !error ? <EmptyState title="Loading health checks" copy="Waiting for history, supervisor, and report endpoints." /> : null}
+        {!health.length && !error ? <EmptyState title="Loading health checks" copy="Waiting for compose node endpoints." /> : null}
       </div>
     </section>
   );

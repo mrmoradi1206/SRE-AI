@@ -19,7 +19,13 @@ x-agent-env: &agent-env
   REPORT_AGENT_URL: ${REPORT_AGENT_URL:-http://report-agent:8002}
   SUPERVISOR_AGENT_URL: ${SUPERVISOR_AGENT_URL:-http://supervisor-agent:8003}
   OBSERVABILITY_AGENT_URL: ${OBSERVABILITY_AGENT_URL:-http://observability-agent:8003}
+  REPO_AGENT_URL: ${REPO_AGENT_URL:-http://repo-agent:8004}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  PROMETHEUS_URL: ${PROMETHEUS_URL:-http://prometheus:9090}
+  ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
+  GITLAB_URL: ${GITLAB_URL:-https://gitlab.com}
+  GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+  GITLAB_PROJECT_ID: ${GITLAB_PROJECT_ID:-}
   AI_PROVIDER: ${AI_PROVIDER:-stub}
   AI_MODEL: ${AI_MODEL:-local-fallback}
   AI_API_KEY: ${AI_API_KEY:-}
@@ -244,13 +250,47 @@ services:
       context: .
       dockerfile: services/observability-agent/Dockerfile
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
+      <<: *agent-env
       SERVICE_NAME: observability-agent
       SERVICE_PORT: ${OBSERVABILITY_AGENT_INTERNAL_PORT:-8003}
     ports:
       - "${OBSERVABILITY_AGENT_PORT:-8004}:8003"
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/health', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    logging: *default-logging
+    networks:
+      - sre-ai
+
+  repo-agent:
+    build:
+      context: .
+      dockerfile: services/repo-agent/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      <<: *agent-env
+      SERVICE_NAME: repo-agent
+      SERVICE_PORT: ${REPO_AGENT_INTERNAL_PORT:-8004}
+    ports:
+      - "${REPO_AGENT_PORT:-8005}:8004"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/health', timeout=3)\""]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -280,6 +320,10 @@ services:
       report-agent:
         condition: service_healthy
       supervisor-agent:
+        condition: service_healthy
+      observability-agent:
+        condition: service_healthy
+      repo-agent:
         condition: service_healthy
     ports:
       - "${NGINX_PORT:-8080}:80"

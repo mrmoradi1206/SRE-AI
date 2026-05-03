@@ -26,6 +26,7 @@ from aiops_shared.projector import apply_event_to_projection
 from aiops_shared.queue import enqueue_job
 
 from core.analyzer import AnalysisService
+from core.memory import ReActMemory
 from core.config import (
     HISTORY_AGENT_URL,
     HTTP_BACKOFF_SECONDS,
@@ -40,6 +41,7 @@ from core.config import (
 router = APIRouter(prefix='/supervisor')
 plain_router = APIRouter()
 service = AnalysisService()
+react_memory = ReActMemory()
 http_client = AsyncServiceClient(
     timeout=HTTP_TIMEOUT,
     max_retries=HTTP_MAX_RETRIES,
@@ -454,11 +456,33 @@ async def queue_analyze(payload: SupervisorAnalyzeIn, request: Request, idempote
     return {'queued': True, 'job_id': str(job.id)}
 
 
+
+
+async def _incident_trace_payload(incident_id: str) -> dict:
+    history = await react_memory.get_history(incident_id, limit=50)
+    return {
+        'incident_id': incident_id,
+        'memory_key': incident_id,
+        'steps': history,
+        'count': len(history),
+    }
+
+
+@plain_router.get('/api/v1/incidents/{incident_id}/trace')
+async def incident_trace_v1(incident_id: str) -> dict:
+    return await _incident_trace_payload(incident_id)
+
 @router.get('/incidents/{incident_id}')
 async def supervisor_view(incident_id: str) -> dict:
     response = await http_client.get(f'{HISTORY_AGENT_URL}/incidents/{incident_id}')
     return response.json()
 
+
+
+
+@router.get('/incidents/{incident_id}/trace')
+async def supervisor_incident_trace(incident_id: str) -> dict:
+    return await _incident_trace_payload(incident_id)
 
 @router.get('/settings', response_model=AISettingsOut)
 async def get_settings(session: AsyncSession = Depends(get_db)) -> AISettingsOut:

@@ -5,7 +5,8 @@ SRE-AI is a Docker-first, multi-agent incident platform:
 - `history-agent`: receives and deduplicates incoming alerts, stores incidents/events, and provides history APIs
 - `report-agent`: generates incident reports from supervisor context
 - `supervisor-agent`: owns incident lifecycle transitions and ReAct-style AI analysis
-- `observability-agent`: scaffolded metrics/log query API for supervisor tool calls
+- `observability-agent`: Prometheus/Elasticsearch query API for supervisor tool calls and UI drilldowns
+- `repo-agent`: GitLab commits/MRs lookup API for incident context
 - `redis`: short-lived ReAct memory for supervisor reasoning sessions
 - `postgres`: durable storage
 - `nginx`: reverse proxy, API facade, and React UI host
@@ -21,7 +22,8 @@ Everything is wired for local/VM deployment with one compose file.
 - `services/history-agent/` service implementation, tests entrypoints, and local README
 - `services/report-agent/` service implementation and local README
 - `services/supervisor-agent/` service implementation and local README
-- `services/observability-agent/` scaffolded FastAPI observability API
+- `services/observability-agent/` FastAPI observability API with Prometheus and Elasticsearch integrations
+- `services/repo-agent/` FastAPI GitLab integration API
 - `services/nginx/` reverse-proxy and Vite React UI
 - `shared/` shared models, database helpers, schemas, and clients
 - `infra/postgres/` DB bootstrap + migrations
@@ -163,7 +165,11 @@ nginx :8080
         |       - calls report-agent after queued analysis
         |
         +--> observability-agent :8003
-        |       - exposes /api/v1/query for tool-call experiments
+        |       - exposes /api/v1/query, /api/v1/metrics/query, /api/v1/logs/errors
+        |       - talks to Prometheus and Elasticsearch when configured
+        |
+        +--> repo-agent :8004
+        |       - exposes /api/v1/repo/changes for GitLab commits/MRs
         |
         +--> /api/report/*
                 |
@@ -218,8 +224,9 @@ agents -> postgres
 | --- | --- | --- |
 | history-agent | `8001` | `GET /health`, `GET /ready`, plus incident APIs |
 | report-agent | `8002` | `GET /health`, `GET /ready`, report generation/retrieval APIs |
-| supervisor-agent | `8003` | `GET /health`, `GET /ready`, lifecycle & config APIs |
-| observability-agent | `8004` host -> `8003` container | `GET /health`, `POST /api/v1/query` |
+| supervisor-agent | `8003` | `GET /health`, `GET /ready`, lifecycle/config APIs, `GET /api/v1/incidents/{id}/trace` |
+| observability-agent | `8004` host -> `8003` container | `GET /health`, `POST /api/v1/query`, `POST /api/v1/metrics/query`, `GET /api/v1/logs/errors` |
+| repo-agent | `8005` host -> `8004` container | `GET /health`, `GET /api/v1/repo/changes` |
 | redis | `6379` (or `REDIS_PORT`) | ReAct memory store |
 | nginx UI/API | `8080` (or `NGINX_PORT`) | Browser UI + API facade |
 | prometheus | `9090` (or `PROMETHEUS_PORT`) | scrape UI and metrics rules UI |
@@ -260,12 +267,27 @@ All frontend/API traffic is served through one listener, prefixed by `/api`:
   - `PUT /api/supervisor/settings`
   - `GET /api/supervisor/dlq`
   - `GET /api/supervisor/queue`
+  - `GET /api/supervisor/incidents/{incident_id}/trace`
   - `GET /api/config/llm`
   - `POST /api/config/llm`
   - `GET /api/config/llm/secrets`
   - `POST /api/config/llm/secrets`
   - `POST /api/config/llm/test/{agent}`
   - `POST /api/test-workflow`
+- Observability and repo integrations
+  - `GET /api/observability/health`
+  - `POST /api/observability/api/v1/metrics/query`
+  - `GET /api/observability/api/v1/logs/errors?service=<service>&minutes=60`
+  - `GET /api/repo/health`
+  - `GET /api/repo/api/v1/repo/changes`
+
+### ReAct trace and integration UI
+
+- `supervisor-agent` writes each ReAct step to Redis under the incident ID with a 24 hour TTL.
+- Direct service endpoint: `GET http://<host>:8003/api/v1/incidents/{incident_id}/trace`.
+- UI/API facade endpoint: `GET /api/supervisor/incidents/{incident_id}/trace`.
+- The incident detail page polls this trace every 3 seconds while the incident status is `investigating`.
+- The incident detail page also includes widgets for PromQL results, Elasticsearch error logs/stack traces, and recent GitLab commits/MRs.
 
 ---
 
@@ -412,7 +434,8 @@ There is no history model setting by design. `history-agent` is deterministic an
   - `HISTORY_AGENT_PORT`, `REPORT_AGENT_PORT`, `SUPERVISOR_AGENT_PORT`
   - `NGINX_PORT`, `PROMETHEUS_PORT`, `ALERTMANAGER_PORT`, `NODE_EXPORTER_PORT`, `GRAFANA_PORT`, `JAEGER_UI_PORT`, `JAEGER_AGENT_PORT`
 - URLs
-  - `HISTORY_AGENT_URL`, `REPORT_AGENT_URL`, `SUPERVISOR_AGENT_URL`
+  - `HISTORY_AGENT_URL`, `REPORT_AGENT_URL`, `SUPERVISOR_AGENT_URL`, `OBSERVABILITY_AGENT_URL`, `REPO_AGENT_URL`
+  - `PROMETHEUS_URL`, `ELASTICSEARCH_URL`, `GITLAB_URL`, `GITLAB_PROJECT_ID`
   - `VITE_API_BASE_URL` (defaults to `/api`)
 - Security and ingestion behavior
   - `ALERT_WEBHOOK_SECRET` (optional webhook signature enforcement)
@@ -424,6 +447,7 @@ There is no history model setting by design. `history-agent` is deterministic an
   - `HTTP_TIMEOUT`, `HTTP_MAX_RETRIES`, `HTTP_BACKOFF_SECONDS`
   - `HTTP_CIRCUIT_BREAKER_THRESHOLD`, `HTTP_CIRCUIT_BREAKER_RESET_SECONDS`
   - `LLM_CONFIG_PATH`, `LLM_RUNTIME_SECRETS_PATH`
+  - `GITLAB_TOKEN`
   - `REPORT_INTEGRATIONS_CONFIG_PATH`, `MATTERMOST_WEBHOOK_URL`
 - Grafana admin
   - `GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD`
