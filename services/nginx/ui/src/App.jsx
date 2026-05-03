@@ -282,20 +282,40 @@ function IncidentsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState({ items: [], total: 0, page: 1, page_size: 20 });
   const [error, setError] = useState('');
+  const [deletingId, setDeletingId] = useState('');
 
   const statusFilter = searchParams.get('status') || '';
   const query = searchParams.get('query') || '';
 
-  useEffect(() => {
+  const loadIncidents = () => {
     const params = new URLSearchParams();
     if (statusFilter) params.set('status', statusFilter);
     if (query) params.set('query', query);
     params.set('page', '1');
     params.set('page_size', '20');
-    apiFetch(`/history/incidents?${params.toString()}`)
+    return apiFetch(`/history/incidents?${params.toString()}`)
       .then(setData)
       .catch((err) => setError(err.message));
+  };
+
+  useEffect(() => {
+    loadIncidents();
   }, [statusFilter, query]);
+
+  const deleteIncident = async (incident) => {
+    const label = incident.summary || incident.fingerprint;
+    if (!window.confirm(`Delete this incident and all its alerts/events?\n\n${label}`)) return;
+    setDeletingId(incident.id);
+    setError('');
+    try {
+      await apiFetch(`/history/incidents/${incident.id}`, { method: 'DELETE' });
+      await loadIncidents();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDeletingId('');
+    }
+  };
 
   return (
     <section className="panel">
@@ -337,17 +357,27 @@ function IncidentsPage() {
       {error ? <p className="error-text">{error}</p> : null}
       <div className="incident-list">
         {data.items.map((incident) => (
-          <Link key={incident.id} className="incident-row" to={`/incidents/${incident.id}`}>
-            <div>
-              <strong>{incident.summary || incident.fingerprint}</strong>
-              <p>{incident.grouping_key.slice(0, 18)}... last seen {formatDate(incident.last_seen_at)}</p>
-            </div>
+          <article key={incident.id} className="incident-row">
+            <Link className="incident-main-link" to={`/incidents/${incident.id}`}>
+              <div>
+                <strong>{incident.summary || incident.fingerprint}</strong>
+                <p>{incident.grouping_key.slice(0, 18)}... last seen {formatDate(incident.last_seen_at)}</p>
+              </div>
+            </Link>
             <div className="incident-meta">
               <span>{incident.alert_count} alerts</span>
               <SeverityChip severity={incident.severity} />
               <StatusChip status={incident.status} />
+              <button
+                type="button"
+                className="danger-button"
+                disabled={deletingId === incident.id}
+                onClick={() => deleteIncident(incident)}
+              >
+                Delete
+              </button>
             </div>
-          </Link>
+          </article>
         ))}
         {!data.items.length && !error ? <EmptyState title="No matching incidents" copy="Adjust the filters or generate a sample alert from the workflow page." /> : null}
       </div>
@@ -405,6 +435,38 @@ function IncidentDetailPage() {
     }
   };
 
+  const deleteCurrentIncident = async () => {
+    if (!window.confirm(`Delete this incident and all its alerts/events?\n\n${incident.summary || incident.fingerprint}`)) return;
+    setBusy(true);
+    setMessage('');
+    setError('');
+    try {
+      const result = await apiFetch(`/history/incidents/${incident.id}`, { method: 'DELETE' });
+      setMessage(JSON.stringify(result, null, 2));
+      navigate('/incidents');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteEvent = async (event) => {
+    if (!window.confirm(`Delete this event from the incident timeline?\n\n${event.event_type}`)) return;
+    setBusy(true);
+    setMessage('');
+    setError('');
+    try {
+      const result = await apiFetch(`/history/incidents/${incident.id}/events/${event.event_id}`, { method: 'DELETE' });
+      setMessage(JSON.stringify(result, null, 2));
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const correlationNodes = useMemo(() => {
     if (!incident) return [];
     return incident.timeline.slice(0, 10).map((event) => ({
@@ -444,6 +506,7 @@ function IncidentDetailPage() {
           <button disabled={busy} onClick={() => act('/supervisor/mitigate', { incident_id: incident.id, reason: 'Mitigate from UI' })}>Mitigate</button>
           <button disabled={busy} onClick={() => act('/supervisor/resolve', { incident_id: incident.id, reason: 'Resolve from UI' })}>Resolve</button>
           <button disabled={busy} onClick={() => act(`/report/${incident.id}`, {})}>Generate Report</button>
+          <button className="danger-button" disabled={busy} onClick={deleteCurrentIncident}>Delete Incident</button>
           <button className="ghost-button" onClick={() => navigate('/incidents')}>Back</button>
         </div>
         {message ? <pre>{message}</pre> : null}
@@ -499,6 +562,14 @@ function IncidentDetailPage() {
                 <span>{event.actor}</span>
                 <span>{formatDate(event.created_at)}</span>
               </div>
+              <button
+                type="button"
+                className="danger-button small-button"
+                disabled={busy}
+                onClick={() => deleteEvent(event)}
+              >
+                Delete event
+              </button>
               <pre>{JSON.stringify({ metadata: event.metadata, payload: event.payload }, null, 2)}</pre>
             </article>
           ))}

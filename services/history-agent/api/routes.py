@@ -5,12 +5,12 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aiops_shared.database import get_db
-from aiops_shared.models import Alert, Incident, IncidentEvent
+from aiops_shared.models import Alert, EventQueue, Incident, IncidentEvent
 from aiops_shared.replay import replay_incident_stream
 from aiops_shared.schemas import AlertBatchIn, AlertIn, AlertOut, DashboardStats, EventEnvelopeOut, IncidentListItem, IncidentOut, IncidentReplayOut
 from aiops_shared.utils import clamp_page_size, health_payload
@@ -20,6 +20,18 @@ from core.search import apply_incident_filters, build_incident_detail, list_inci
 from core.storage import dashboard_counts, ingest_alert, ingest_alert_batch, recent_alerts_summary, translate_integrity_error
 
 router = APIRouter()
+
+
+def _parse_uuid(value: str, name: str = 'id') -> UUID:
+    try:
+        return UUID(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f'invalid {name}') from exc
+
+
+async def _set_incident_event_delete_guard(session: AsyncSession, enabled: bool) -> None:
+    action = 'ENABLE' if enabled else 'DISABLE'
+    await session.execute(text(f'ALTER TABLE incident_events {action} TRIGGER trg_incident_events_no_delete'))
 
 
 def _request_metadata(request: Request) -> dict:
@@ -221,6 +233,71 @@ async def replay_incident_events(incident_id: str, session: AsyncSession = Depen
         replayed_state=state.model_dump(),
         events=[EventEnvelopeOut.model_validate(event) for event in events],
     )
+
+
+@router.delete('/incidents/{incident_id}')
+async def delete_incident(incident_id: str, session: AsyncSession = Depends(get_db)) -> dict:
+    incident_uuid = _parse_uuid(incident_id, 'incident_id')
+    incident = (await session.execute(select(Incident).where(Incident.id == incident_uuid))).scalar_one_or_none()
+    if incident is None:
+        raise HTTPException(status_code=404, detail='incident not found')
+
+    alert_count = int((await session.scalar(select(func.count()).select_from(Alert).where(Alert.incident_id == incident_uuid))) or 0)
+    event_count = int((await session.scalar(select(func.count()).select_from(IncidentEvent).where(IncidentEvent.stream_id == incident_uuid))) or 0)
+    queued_count = int((await session.scalar(select(func.count()).select_from(EventQueue).where(EventQueue.stream_id == incident_uuid))) or 0)
+
+    try:
+        await _set_incident_event_delete_guard(session, enabled=False)
+        await session.execute(delete(EventQueue).where(EventQueue.stream_id == incident_uuid))
+        await session.delete(incident)
+        await session.flush()
+        await _set_incident_event_delete_guard(session, enabled=True)
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+
+    return {
+        'deleted': True,
+        'incident_id': str(incident_uuid),
+        'alerts_deleted': alert_count,
+        'events_deleted': event_count,
+        'queued_actions_deleted': queued_count,
+    }
+
+
+@router.delete('/incidents/{incident_id}/events/{event_id}')
+async def delete_incident_event(incident_id: str, event_id: str, session: AsyncSession = Depends(get_db)) -> dict:
+    incident_uuid = _parse_uuid(incident_id, 'incident_id')
+    event_uuid = _parse_uuid(event_id, 'event_id')
+    incident_exists = await session.scalar(select(func.count()).select_from(Incident).where(Incident.id == incident_uuid))
+    if not incident_exists:
+        raise HTTPException(status_code=404, detail='incident not found')
+
+    event = (
+        await session.execute(
+            select(IncidentEvent).where(IncidentEvent.stream_id == incident_uuid, IncidentEvent.event_id == event_uuid)
+        )
+    ).scalar_one_or_none()
+    if event is None:
+        raise HTTPException(status_code=404, detail='event not found')
+
+    deleted_event = {
+        'event_id': str(event.event_id),
+        'event_type': event.event_type,
+        'sequence_number': event.sequence_number,
+    }
+    try:
+        await _set_incident_event_delete_guard(session, enabled=False)
+        await session.delete(event)
+        await session.flush()
+        await _set_incident_event_delete_guard(session, enabled=True)
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+
+    return {'deleted': True, 'incident_id': str(incident_uuid), 'event': deleted_event}
 
 
 @router.get('/dashboard', response_model=DashboardStats)

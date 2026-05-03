@@ -325,6 +325,8 @@ Keep `send_resolved: true`. When Alertmanager sends a resolved notification, `hi
 
 Each incident detail page includes a simple workflow report. It shows what History, Supervisor, and Report agents did, the final generated report text, and the channel delivery record such as whether Mattermost delivery was sent, skipped, or failed. The same data is available from `GET /api/report/{incident_id}/workflow-summary`.
 
+Incidents and timeline events can be deleted from the UI when cleaning test data. Use the Incidents page delete button to remove an incident together with its alerts, timeline events, and queued actions, or open an incident and use `Delete event` on a single timeline entry. The matching APIs are `DELETE /api/history/incidents/{incident_id}` and `DELETE /api/history/incidents/{incident_id}/events/{event_id}`.
+
 Connect Mattermost report delivery:
 
 1. Open `http://<server-ip>:8080/integrations`.

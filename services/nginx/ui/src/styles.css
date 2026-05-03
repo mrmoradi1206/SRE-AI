@@ -465,6 +465,23 @@ button:disabled {
   box-shadow: none;
 }
 
+.danger-button {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid rgba(182, 63, 50, 0.28);
+  box-shadow: none;
+}
+
+.danger-button:hover {
+  box-shadow: 0 14px 26px rgba(182, 63, 50, 0.16);
+}
+
+.small-button {
+  width: fit-content;
+  padding: 0.48rem 0.72rem;
+  font-size: 0.78rem;
+}
+
 .panel-header a {
   border-radius: 999px;
   padding: 0.55rem 0.8rem;
@@ -512,6 +529,11 @@ button:disabled {
   justify-content: space-between;
   gap: 1rem;
   transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.incident-main-link {
+  flex: 1;
+  min-width: 220px;
 }
 
 .incident-row:hover {
