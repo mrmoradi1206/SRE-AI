@@ -254,6 +254,7 @@ async def test_workflow(payload: TestWorkflowIn, request: Request, session: Asyn
             f'{REPORT_AGENT_URL}/report/{incident_id}',
             json={'analysis': decision},
             headers={'Idempotency-Key': f'test-workflow:report:{workflow_id}'},
+            timeout=max(HTTP_TIMEOUT, 150.0),
         )
         report = report_response.json()
         trace.append(_step('report.generate', started, 'ok', provider=report.get('provider'), model=report.get('model')))

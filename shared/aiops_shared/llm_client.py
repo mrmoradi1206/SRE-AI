@@ -194,7 +194,7 @@ async def _run_gapgpt(
     cache_key = f'{selected_provider}:{api_key[:8]}'
     client = _gapgpt_client_cache.get(cache_key)
     if client is None:
-        client = AsyncOpenAI(api_key=api_key, base_url=_base_url(selected_provider), timeout=request_timeout)
+        client = AsyncOpenAI(api_key=api_key, base_url=_base_url(selected_provider), timeout=request_timeout, max_retries=0)
         _gapgpt_client_cache[cache_key] = client
 
     try:

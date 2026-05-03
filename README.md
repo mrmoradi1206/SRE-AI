@@ -425,6 +425,11 @@ For any non-dev environment, prefer a secret manager over checked-in `.env` valu
 - If ports look fine but API/UI still blank:
   - `docker compose logs -f nginx`
   - `docker compose exec nginx nginx -T | sed -n '1,240p'` (or inspect `services/nginx/nginx.conf`)
+- If the browser shows `504 Gateway Time-out` on `/workflow`, report generation, or AI actions:
+  - `docker compose logs nginx | grep -Ei '504|timed out|upstream'`
+  - check the agent logs for slow LLM calls or provider retries
+  - verify API keys/provider routing in `/settings`
+  - long-running AI routes use extended nginx proxy timeouts, but an unreachable LLM provider can still delay fallback output
 - If services fail to become healthy:
   - check DB readiness first (`docker compose logs -f postgres`)
   - verify migrations exist in `infra/postgres/migrations`

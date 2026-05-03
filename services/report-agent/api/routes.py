@@ -162,11 +162,11 @@ async def generate_report(
     render_result = await formatter.render_with_trace(incident_bundle, provider=llm_settings['provider'], model=llm_settings['model'])
     report_text = render_result['report']
 
-    async with session.begin():
-        incident = (await session.execute(select(Incident).where(Incident.id == incident_id))).scalar_one_or_none()
-        if incident is None:
-            raise HTTPException(status_code=404, detail='incident not found')
-        try:
+    try:
+        async with session.begin():
+            incident = (await session.execute(select(Incident).where(Incident.id == incident_id))).scalar_one_or_none()
+            if incident is None:
+                raise HTTPException(status_code=404, detail='incident not found')
             event = await append_event(
                 session,
                 stream_id=incident.id,
@@ -184,11 +184,12 @@ async def generate_report(
                 },
                 metadata=_metadata(request),
             )
-        except IntegrityError:
+    except IntegrityError:
+        async with session.begin():
             existing = await get_existing_event_by_idempotency(session, effective_idempotency_key)
-            if existing is not None:
-                return {'incident_id': incident_id, 'report': existing.payload.get('report'), 'deduplicated': True}
-            raise
+        if existing is not None:
+            return {'incident_id': incident_id, 'report': existing.payload.get('report'), 'deduplicated': True}
+        raise
 
     mattermost_delivery = {'enabled': False, 'sent': False, 'skipped': 'disabled'}
     try:
