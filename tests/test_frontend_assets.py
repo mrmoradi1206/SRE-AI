@@ -12,6 +12,9 @@ def test_ui_contains_dashboard_and_search_assets():
     assert 'Test Workflow' in app
     assert 'Alertmanager integration' in app
     assert '/api/alertmanager/webhook' in app
+    assert 'Mattermost delivery' in app
+    assert '/report/integrations/mattermost' in app
+    assert 'Why there is no history model' in app
     assert 'Test LLM call' in app
     assert 'Runtime API keys' in app
     assert 'location = /api/alertmanager/webhook' in nginx_conf

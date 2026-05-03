@@ -6,7 +6,9 @@ __pycache__/
 *.log
 *.zip
 config/llm_runtime_secrets.json
+config/report_integrations.json
 llm_runtime_secrets.json
+report_integrations.json
 node_modules/
 dist/
 services/nginx/ui/dist/

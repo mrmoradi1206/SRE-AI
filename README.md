@@ -157,6 +157,9 @@ All frontend/API traffic is served through one listener, prefixed by `/api`:
 - Report (prefix `/api/report/`)
   - `GET /api/report/health`
   - `GET /api/report/ready`
+  - `GET /api/report/integrations/mattermost`
+  - `PUT /api/report/integrations/mattermost`
+  - `POST /api/report/integrations/mattermost/test`
   - `POST /api/report/{incident_id}`
   - `GET /api/report/{incident_id}`
 - Supervisor config + workflow (prefix `/api/supervisor/` for status/ops, `/api/config/` and `/api/test-workflow` for settings)
@@ -242,6 +245,15 @@ receivers:
 
 Every firing Alertmanager alert is ingested by `history-agent`. The ingestion path queues `supervisor-agent`, and the supervisor queue worker generates a report after analysis, so the full History -> Supervisor -> Report workflow runs automatically.
 
+Connect Mattermost report delivery:
+
+1. Open `http://<server-ip>:8080/integrations`.
+2. Paste a Mattermost incoming webhook URL in the Mattermost delivery card.
+3. Enable delivery, optionally set a channel override and bot username, then save.
+4. Use **Send Mattermost Test** to verify the webhook.
+
+When enabled, every newly generated report is posted by `report-agent` to Mattermost. Report storage does not depend on Mattermost availability; delivery failures are written to the dead-letter queue as `report.deliver_mattermost`.
+
 ---
 
 ## LLM configuration and dynamic routing
@@ -279,6 +291,8 @@ Example config shape is:
 }
 ```
 
+There is no history model setting by design. `history-agent` is deterministic and does not call an LLM; it verifies webhooks, deduplicates alerts, persists the append-only timeline, and serves incident context. Only `supervisor-agent` and `report-agent` use model routing.
+
 ---
 
 ## Environment reference (short list)
@@ -302,6 +316,7 @@ Example config shape is:
   - `HTTP_TIMEOUT`, `HTTP_MAX_RETRIES`, `HTTP_BACKOFF_SECONDS`
   - `HTTP_CIRCUIT_BREAKER_THRESHOLD`, `HTTP_CIRCUIT_BREAKER_RESET_SECONDS`
   - `LLM_CONFIG_PATH`, `LLM_RUNTIME_SECRETS_PATH`
+  - `REPORT_INTEGRATIONS_CONFIG_PATH`, `MATTERMOST_WEBHOOK_URL`
 - Grafana admin
   - `GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD`
 
@@ -314,7 +329,7 @@ For any non-dev environment, prefer a secret manager over checked-in `.env` valu
 - If `ALERT_WEBHOOK_SECRET` is set, alert ingestion expects:
   - `X-SRE-AI-Signature: sha256=<hmac>` or
   - `X-Hub-Signature-256: sha256=<hmac>`
-- Runtime keys and runtime secrets are never committed by design (`.gitignore` includes `config/llm_runtime_secrets.json`).
+- Runtime keys and runtime secrets are never committed by design (`.gitignore` includes `config/llm_runtime_secrets.json` and `config/report_integrations.json`).
 - Request correlation IDs are carried through internal calls for traceability.
 - DB constraints and idempotency keys protect against duplicate event ingestion and duplicate status transitions.
 

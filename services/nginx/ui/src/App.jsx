@@ -638,6 +638,126 @@ function AgentsPage() {
   );
 }
 
+function MattermostIntegration() {
+  const [config, setConfig] = useState(null);
+  const [draft, setDraft] = useState({ enabled: false, webhook_url: '', channel: '', username: 'SRE-AI Report Agent', icon_url: '' });
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+
+  const load = async () => {
+    setError('');
+    try {
+      const next = await apiFetch('/report/integrations/mattermost');
+      setConfig(next);
+      setDraft((current) => ({
+        ...current,
+        enabled: Boolean(next.enabled),
+        channel: next.channel || '',
+        username: next.username || 'SRE-AI Report Agent',
+        icon_url: next.icon_url || '',
+        webhook_url: '',
+      }));
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const update = (patch) => setDraft((current) => ({ ...current, ...patch }));
+
+  const save = async () => {
+    setBusy('save');
+    setMessage('');
+    setError('');
+    try {
+      const payload = { ...draft };
+      if (!payload.webhook_url) {
+        delete payload.webhook_url;
+      }
+      const next = await apiFetch('/report/integrations/mattermost', { method: 'PUT', body: JSON.stringify(payload) });
+      setConfig(next);
+      update({ webhook_url: '' });
+      setMessage('Mattermost integration saved. New report-agent reports will be posted when delivery is enabled.');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const sendTest = async () => {
+    setBusy('test');
+    setMessage('');
+    setError('');
+    try {
+      const result = await apiFetch('/report/integrations/mattermost/test', { method: 'POST', body: JSON.stringify({}) });
+      setMessage(result.sent ? 'Mattermost test message sent.' : `Mattermost test skipped: ${result.skipped || 'disabled'}`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  return (
+    <div className="panel span-2">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">Mattermost delivery</p>
+          <h3>Send reports to a channel</h3>
+        </div>
+        <StatusChip status={config?.enabled ? 'resolved' : 'open'} />
+      </div>
+      <p>
+        Paste a Mattermost incoming webhook URL. When report-agent generates a new incident report, it posts the report
+        to Mattermost without blocking report storage.
+      </p>
+      <div className="secret-grid">
+        <label className="toggle-row">
+          <input type="checkbox" checked={draft.enabled} onChange={(event) => update({ enabled: event.target.checked })} />
+          Enable Mattermost delivery
+        </label>
+        <label>
+          Incoming webhook URL
+          <span className="field-hint">
+            {config?.webhook_url_configured ? `configured (${config.webhook_url_preview})` : 'not configured'}
+          </span>
+          <input
+            type="password"
+            value={draft.webhook_url}
+            placeholder="https://mattermost.example.com/hooks/..."
+            onChange={(event) => update({ webhook_url: event.target.value })}
+          />
+        </label>
+        <label>
+          Channel override
+          <input value={draft.channel} placeholder="town-square or @username" onChange={(event) => update({ channel: event.target.value })} />
+        </label>
+        <label>
+          Bot username
+          <input value={draft.username} onChange={(event) => update({ username: event.target.value })} />
+        </label>
+        <label>
+          Icon URL
+          <input value={draft.icon_url} placeholder="https://example.com/icon.png" onChange={(event) => update({ icon_url: event.target.value })} />
+        </label>
+      </div>
+      <div className="action-row wrap">
+        <button type="button" disabled={Boolean(busy)} onClick={save}>{busy === 'save' ? 'Saving...' : 'Save Mattermost'}</button>
+        <button type="button" className="ghost-button" disabled={Boolean(busy) || !config?.enabled} onClick={sendTest}>
+          {busy === 'test' ? 'Sending...' : 'Send Mattermost Test'}
+        </button>
+      </div>
+      {message ? <p className="success-text">{message}</p> : null}
+      {error ? <p className="error-text">{error}</p> : null}
+    </div>
+  );
+}
+
 function IntegrationPage() {
   const [host, setHost] = useState(() => window.location.hostname || '<server-ip>');
   const [port, setPort] = useState(() => window.location.port || '8080');
@@ -800,6 +920,8 @@ function IntegrationPage() {
         </div>
         <pre>{curlCommand}</pre>
       </div>
+
+      <MattermostIntegration />
     </section>
   );
 }
@@ -906,6 +1028,21 @@ function SettingsPage() {
         <div className="provider-strip">
           {draft.providers.map((provider) => <span key={provider}>{providerLabel(provider)}</span>)}
         </div>
+      </div>
+
+      <div className="panel span-2">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">History node</p>
+            <h3>Why there is no history model</h3>
+          </div>
+          <StatusChip status="resolved" />
+        </div>
+        <p>
+          The history-agent is intentionally deterministic: it verifies webhooks, deduplicates alerts, writes the
+          append-only timeline, and serves incident context. It does not call an LLM, so there is no model route to
+          configure. Supervisor and report are the only LLM-backed nodes.
+        </p>
       </div>
 
       {agents.map((agent) => {

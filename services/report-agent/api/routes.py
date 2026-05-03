@@ -26,6 +26,14 @@ from core.config import (
     SERVICE_NAME,
 )
 from core.formatter import ReportFormatter
+from core.mattermost import (
+    MattermostConfigError,
+    MattermostDeliveryError,
+    load_mattermost_config,
+    public_mattermost_config,
+    save_mattermost_config,
+    send_report_to_mattermost,
+)
 
 router = APIRouter()
 formatter = ReportFormatter()
@@ -76,6 +84,48 @@ async def ready(session: AsyncSession = Depends(get_db)) -> dict:
     except Exception as exc:
         raise HTTPException(status_code=503, detail='database unavailable') from exc
     return health_payload(SERVICE_NAME, 'connected', readiness='ready')
+
+
+@router.get('/report/integrations/mattermost')
+async def get_mattermost_integration() -> dict:
+    try:
+        return public_mattermost_config()
+    except MattermostConfigError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.put('/report/integrations/mattermost')
+async def update_mattermost_integration(payload: dict) -> dict:
+    try:
+        return public_mattermost_config(save_mattermost_config(payload))
+    except MattermostConfigError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail='failed to save Mattermost integration') from exc
+
+
+@router.post('/report/integrations/mattermost/test')
+async def test_mattermost_integration() -> dict:
+    sample_bundle = {
+        'incident': {
+            'id': 'mattermost-test',
+            'summary': 'Synthetic SRE-AI Mattermost delivery test',
+            'severity': 'info',
+            'status': 'testing',
+        },
+        'timeline': [],
+        'alerts': [],
+    }
+    sample_report = (
+        'This is a test message from the SRE-AI report-agent. '
+        'If you can read this in Mattermost, report delivery is configured.'
+    )
+    try:
+        return await send_report_to_mattermost(sample_report, sample_bundle, timeout=max(HTTP_TIMEOUT, 15.0))
+    except MattermostConfigError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except MattermostDeliveryError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post('/report/{incident_id}')
@@ -139,6 +189,22 @@ async def generate_report(
             if existing is not None:
                 return {'incident_id': incident_id, 'report': existing.payload.get('report'), 'deduplicated': True}
             raise
+
+    mattermost_delivery = {'enabled': False, 'sent': False, 'skipped': 'disabled'}
+    try:
+        mattermost_delivery = await send_report_to_mattermost(report_text, incident_bundle, timeout=max(HTTP_TIMEOUT, 15.0))
+    except Exception as exc:  # noqa: BLE001
+        mattermost_delivery = {'enabled': True, 'sent': False, 'error': str(exc)}
+        async with session.begin():
+            await enqueue_dead_letter(
+                session,
+                service=SERVICE_NAME,
+                operation='report.deliver_mattermost',
+                payload={'incident_id': incident_id, 'event_id': str(event.event_id)},
+                error_message=str(exc),
+                correlation_id=_correlation_uuid(request),
+                idempotency_key=f'mattermost:{effective_idempotency_key}',
+            )
     AGENT_ACTIONS.labels('report-agent', 'report_generated').inc()
     return {
         'incident_id': incident_id,
@@ -148,6 +214,7 @@ async def generate_report(
         'model': llm_settings['model'],
         'fallback_used': render_result['fallback_used'],
         'llm_trace': render_result.get('llm_trace'),
+        'mattermost_delivery': mattermost_delivery,
     }
 
 

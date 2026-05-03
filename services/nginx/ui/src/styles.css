@@ -786,6 +786,17 @@ textarea:focus {
   word-break: break-all;
 }
 
+.toggle-row {
+  align-items: center;
+  grid-template-columns: auto 1fr;
+  justify-content: start;
+}
+
+.toggle-row input {
+  width: auto;
+  accent-color: var(--accent);
+}
+
 .prompt-details {
   padding: 0.85rem 1rem;
 }
