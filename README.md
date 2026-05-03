@@ -351,7 +351,7 @@ Example config shape is:
   "models": {
     "openrouter": ["meta-llama/llama-3.1-8b-instruct", "qwen/qwen-2.5-72b-instruct"],
     "llmgateway": ["zai/glm-5.1"],
-    "gapgpt": ["gapgpt-qwen-3.5"]
+    "gapgpt": ["gapgpt-qwen-3.5", "gapgpt-qwen-3.6", "gpt-5.2", "gemini-3-pro-preview"]
   },
   "provider_settings": {
     "openrouter": {
@@ -375,6 +375,8 @@ Example config shape is:
 The `/settings` UI can edit provider/model routes, each LLM-backed agent system prompt, provider base URLs, and per-provider proxy URLs. Prompt and proxy changes are saved to `config/llm_config.json` and take effect on the next LLM call without rebuilding containers.
 
 OpenRouter is configured to use `http://185.255.89.232:5070` by default. To change it in the UI, open `/settings`, edit **Provider networking -> OpenRouter -> HTTP/SOCKS proxy URL**, then save provider settings. Leave the proxy field blank to send provider traffic directly. Environment variables such as `OPENROUTER_PROXY_URL` or `LLM_PROXY_URL` override the file-backed UI setting.
+
+The committed GapGPT model list is populated from `GET https://api.gapgpt.app/v1/models` so the `/settings` model dropdown includes all currently advertised GapGPT model IDs, including chat, image, audio, embedding, and TTS models. Some non-chat models may not work for supervisor/report chat-completion calls.
 
 There is no history model setting by design. `history-agent` is deterministic and does not call an LLM; it verifies webhooks, deduplicates alerts, persists the append-only timeline, and serves incident context. Only `supervisor-agent` and `report-agent` use model routing.
 
