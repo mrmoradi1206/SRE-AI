@@ -27,6 +27,10 @@ class AnalysisService:
         decision['confidence'] = max(0.0, min(1.0, float(decision.get('confidence', 0.0))))
         if not isinstance(decision.get('recommended_actions'), list):
             decision['recommended_actions'] = []
+        decision['recommended_actions'] = [
+            item if isinstance(item, dict) else {'priority': idx + 1, 'action': str(item)}
+            for idx, item in enumerate(decision['recommended_actions'])
+        ]
         if not isinstance(decision.get('requested_context'), list):
             decision['requested_context'] = []
         if not isinstance(decision.get('react_trace'), list):

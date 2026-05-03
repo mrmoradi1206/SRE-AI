@@ -240,6 +240,96 @@ function IncidentIntegrationsPanel({ incident }) {
   );
 }
 
+
+function SimilarIncidentsPanel({ similar }) {
+  const items = similar?.items || [];
+  return (
+    <div className="panel span-2">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">Long-term memory</p>
+          <h3>Similar Past Incidents</h3>
+        </div>
+        <span className="count-pill">{items.length} matches</span>
+      </div>
+      {!items.length ? (
+        <EmptyState title="No learned incidents yet" copy="Approve resolved incidents to build the pgvector knowledge base." />
+      ) : (
+        <div className="stack-list">
+          {items.map((item) => (
+            <article key={item.id} className="stack-item memory-card">
+              <div className="incident-meta">
+                <SeverityChip severity={item.severity} />
+                <span className="count-pill">score {item.score}</span>
+              </div>
+              <strong>{item.summary}</strong>
+              <p>{item.service || 'unknown service'} - {formatDate(item.created_at)}</p>
+              <JsonBlock title="Root cause and resolution" data={{ root_cause: item.root_cause, resolution: item.resolution }} />
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ApproveLearnModal({ incident, trace, report, onClose, onSaved }) {
+  const finalStep = [...(trace?.steps || [])].reverse().find((step) => step.final)?.final || {};
+  const [rootCause, setRootCause] = useState(finalStep.root_cause || '');
+  const [resolution, setResolution] = useState(report?.report_event?.report || finalStep.reasoning_trace || '');
+  const [summary, setSummary] = useState(incident.summary || incident.fingerprint || '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const save = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await apiFetch(`/supervisor/incidents/${incident.id}/approve`, {
+        method: 'POST',
+        body: JSON.stringify({ root_cause: rootCause, resolution, summary, severity: incident.severity }),
+      });
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className="modal-card panel">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Human feedback loop</p>
+            <h3>Approve & Learn</h3>
+          </div>
+          <button type="button" className="ghost-button" onClick={onClose}>Close</button>
+        </div>
+        <label>
+          Incident summary
+          <input value={summary} onChange={(event) => setSummary(event.target.value)} />
+        </label>
+        <label>
+          Final root cause
+          <textarea rows="5" value={rootCause} onChange={(event) => setRootCause(event.target.value)} />
+        </label>
+        <label>
+          Resolution / operator notes
+          <textarea rows="8" value={resolution} onChange={(event) => setResolution(event.target.value)} />
+        </label>
+        <div className="action-row wrap">
+          <button type="button" disabled={busy || rootCause.length < 3 || resolution.length < 3} onClick={save}>{busy ? 'Saving...' : 'Save to long-term memory'}</button>
+          <button type="button" className="ghost-button" disabled={busy} onClick={onClose}>Cancel</button>
+        </div>
+        {error ? <p className="error-text">{error}</p> : null}
+      </div>
+    </div>
+  );
+}
+
 function ProviderBadge({ provider }) {
   return <span className="provider-badge">{providerLabel(provider || 'unknown')}</span>;
 }
@@ -547,6 +637,8 @@ function IncidentDetailPage() {
   const [report, setReport] = useState(null);
   const [workflowSummary, setWorkflowSummary] = useState(null);
   const [reactTrace, setReactTrace] = useState(null);
+  const [similarIncidents, setSimilarIncidents] = useState(null);
+  const [approveOpen, setApproveOpen] = useState(false);
   const [traceLoading, setTraceLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -573,6 +665,12 @@ function IncidentDetailPage() {
         setReactTrace(trace);
       } catch {
         setReactTrace(null);
+      }
+      try {
+        const similar = await apiFetch(`/supervisor/incidents/${incidentId}/similar`);
+        setSimilarIncidents(similar);
+      } catch {
+        setSimilarIncidents(null);
       }
     } catch (err) {
       setError(err.message);
@@ -691,6 +789,7 @@ function IncidentDetailPage() {
           <button disabled={busy} onClick={() => act('/supervisor/mitigate', { incident_id: incident.id, reason: 'Mitigate from UI' })}>Mitigate</button>
           <button disabled={busy} onClick={() => act('/supervisor/resolve', { incident_id: incident.id, reason: 'Resolve from UI' })}>Resolve</button>
           <button disabled={busy} onClick={() => act(`/report/${incident.id}`, {})}>Generate Report</button>
+          <button disabled={busy} onClick={() => setApproveOpen(true)}>Approve & Learn</button>
           <button className="danger-button" disabled={busy} onClick={deleteCurrentIncident}>Delete Incident</button>
           <button className="ghost-button" onClick={() => navigate('/incidents')}>Back</button>
         </div>
@@ -700,7 +799,19 @@ function IncidentDetailPage() {
 
       <ReActTracePanel trace={reactTrace} loading={traceLoading} />
 
+      <SimilarIncidentsPanel similar={similarIncidents} />
+
       <IncidentIntegrationsPanel incident={incident} />
+
+      {approveOpen ? (
+        <ApproveLearnModal
+          incident={incident}
+          trace={reactTrace}
+          report={report}
+          onClose={() => setApproveOpen(false)}
+          onSaved={load}
+        />
+      ) : null}
 
       <div className="panel">
         <div className="panel-header">

@@ -8,6 +8,7 @@ SRE-AI is a Docker-first, multi-agent incident platform:
 - `observability-agent`: Prometheus/Elasticsearch query API for supervisor tool calls and UI drilldowns
 - `repo-agent`: GitLab commits/MRs lookup API for incident context
 - `redis`: short-lived ReAct memory for supervisor reasoning sessions
+- `pgvector`: long-term incident knowledge/RAG memory in Postgres
 - `postgres`: durable storage
 - `nginx`: reverse proxy, API facade, and React UI host
 - `prometheus`, `alertmanager`, `node-exporter`, and `grafana` for observability
@@ -209,6 +210,7 @@ Data persistence path:
 agents -> postgres
   - alerts table stores raw normalized alert payloads
   - incidents table stores current projection/state
+  - incident_knowledge stores approved root cause/resolution embeddings for RAG
   - incident_events stores append-only event history
   - event_queue stores async supervisor work
   - dead_letter_queue stores failed retryable operations
@@ -268,6 +270,8 @@ All frontend/API traffic is served through one listener, prefixed by `/api`:
   - `GET /api/supervisor/dlq`
   - `GET /api/supervisor/queue`
   - `GET /api/supervisor/incidents/{incident_id}/trace`
+  - `GET /api/supervisor/incidents/{incident_id}/similar`
+  - `POST /api/supervisor/incidents/{incident_id}/approve`
   - `GET /api/config/llm`
   - `POST /api/config/llm`
   - `GET /api/config/llm/secrets`
@@ -288,6 +292,7 @@ All frontend/API traffic is served through one listener, prefixed by `/api`:
 - UI/API facade endpoint: `GET /api/supervisor/incidents/{incident_id}/trace`.
 - The incident detail page polls this trace every 3 seconds while the incident status is `investigating`.
 - The incident detail page also includes widgets for PromQL results, Elasticsearch error logs/stack traces, and recent GitLab commits/MRs.
+- Human SREs can click **Approve & Learn** to edit the final root cause/resolution and save it to `incident_knowledge` for future retrieval.
 
 ---
 
@@ -436,6 +441,7 @@ There is no history model setting by design. `history-agent` is deterministic an
 - URLs
   - `HISTORY_AGENT_URL`, `REPORT_AGENT_URL`, `SUPERVISOR_AGENT_URL`, `OBSERVABILITY_AGENT_URL`, `REPO_AGENT_URL`
   - `PROMETHEUS_URL`, `ELASTICSEARCH_URL`, `GITLAB_URL`, `GITLAB_PROJECT_ID`
+  - `REACT_MAX_ITERATIONS`, `REACT_MEMORY_TTL_SECONDS`
   - `VITE_API_BASE_URL` (defaults to `/api`)
 - Security and ingestion behavior
   - `ALERT_WEBHOOK_SECRET` (optional webhook signature enforcement)
@@ -493,6 +499,15 @@ For any non-dev environment, prefer a secret manager over checked-in `.env` valu
 ---
 
 ## Testing
+
+Phase 3 smoke/E2E flow:
+
+```bash
+python3 scripts/e2e_phase3_flow.py http://127.0.0.1:8080
+```
+
+This creates a synthetic incident, runs supervisor analysis, saves an approved root cause/resolution into pgvector-backed long-term memory, and verifies similar-incident retrieval.
+
 
 Run lightweight checks used by CI:
 

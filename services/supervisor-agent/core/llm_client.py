@@ -8,9 +8,11 @@ import httpx
 from aiops_shared.context_loader import normalize_incident_bundle
 from aiops_shared.llm_client import run_llm
 from aiops_shared.llm_config import get_agent_system_prompt
+from aiops_shared.database import get_session_factory
 
-from .config import OBSERVABILITY_AGENT_URL, REACT_MAX_ITERATIONS
+from .config import OBSERVABILITY_AGENT_URL, REACT_MAX_ITERATIONS, REPO_AGENT_URL
 from .memory import ReActMemory
+from .rag import IncidentRAG
 
 logger = logging.getLogger(__name__)
 
@@ -94,40 +96,69 @@ class SupervisorAdvisor:
     def __init__(self) -> None:
         self.cmdb = CMDBEnricher()
         self.memory = ReActMemory()
+        self.rag = IncidentRAG()
 
-    async def query_observability(self, incident_bundle: dict, query: str | dict | None = None) -> dict:
+    def _service_name(self, incident_bundle: dict) -> str:
         bundle = normalize_incident_bundle(incident_bundle)
         incident = bundle.get('incident', {})
         alerts = bundle.get('alerts', [])
         latest_payload = alerts[-1].get('payload', {}) if alerts else {}
         labels = latest_payload.get('labels', {}) if isinstance(latest_payload, dict) else {}
-        signal = query if query else labels.get('alertname') or incident.get('summary') or 'incident-health'
-        payload = {
-            'query': signal if isinstance(signal, str) else json.dumps(signal, default=str),
-            'datasource': 'mock',
-            'incident_id': str(incident.get('id') or ''),
-        }
+        return labels.get('service') or labels.get('job') or labels.get('app') or labels.get('alertname') or incident.get('summary') or 'unknown'
+
+    async def query_observability(self, incident_bundle: dict, query: str | dict | None = None) -> dict:
+        bundle = normalize_incident_bundle(incident_bundle)
+        incident = bundle.get('incident', {})
+        incident_id = str(incident.get('id') or '')
+        service = self._service_name(incident_bundle)
+        promql = query.get('promql') if isinstance(query, dict) else query
+        if not promql:
+            promql = f'up{{job=~"{service}.*"}}' if service and service != 'unknown' else 'up'
+        observations: dict[str, Any] = {'tool': 'query_observability', 'source': 'observability-agent', 'service': service}
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.post(f'{OBSERVABILITY_AGENT_URL.rstrip("/")}/api/v1/query', json=payload)
-            response.raise_for_status()
-            data = response.json()
-            return {'tool': 'query_observability', 'source': 'observability-agent', **data}
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                metrics_response = await client.post(
+                    f'{OBSERVABILITY_AGENT_URL.rstrip("/")}/api/v1/metrics/query',
+                    json={'query': str(promql), 'incident_id': incident_id},
+                )
+                metrics_response.raise_for_status()
+                observations['metrics'] = metrics_response.json()
+                logs_response = await client.get(
+                    f'{OBSERVABILITY_AGENT_URL.rstrip("/")}/api/v1/logs/errors',
+                    params={'service': service if service != 'unknown' else '', 'minutes': 60},
+                )
+                if logs_response.status_code < 500:
+                    observations['logs'] = logs_response.json()
+            observations['summary'] = 'Collected live Prometheus metrics and recent error-log context.'
+            return observations
         except Exception as exc:  # noqa: BLE001
-            logger.warning('query_observability_mock_fallback', extra={'error_type': type(exc).__name__})
-        return {
-            'tool': 'query_observability',
-            'source': 'mock',
-            'observability_agent_url': OBSERVABILITY_AGENT_URL,
-            'query': signal,
-            'summary': 'Mock observability data indicates elevated error/latency signals for the affected service.',
-            'metrics': {
-                'service': labels.get('service') or labels.get('job') or 'unknown',
-                'severity': incident.get('severity') or latest_payload.get('severity') or 'unknown',
-                'alert_count': len(alerts),
-                'sample_window': '15m',
-            },
-        }
+            logger.warning('query_observability_failed', extra={'error_type': type(exc).__name__})
+            return {'tool': 'query_observability', 'source': 'error', 'service': service, 'error': type(exc).__name__, 'summary': 'Observability lookup failed; continue with incident context.'}
+
+    async def query_repo_changes(self, incident_bundle: dict, query: str | dict | None = None) -> dict:
+        project_id = query.get('project_id') if isinstance(query, dict) else None
+        ref = query.get('ref') if isinstance(query, dict) else None
+        params = {'days': 7, 'limit': 10}
+        if project_id:
+            params['project_id'] = project_id
+        if ref:
+            params['ref'] = ref
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                response = await client.get(f'{REPO_AGENT_URL.rstrip("/")}/api/v1/repo/changes', params=params)
+            response.raise_for_status()
+            return {'tool': 'query_repo_changes', 'source': 'repo-agent', **response.json()}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('query_repo_changes_failed', extra={'error_type': type(exc).__name__})
+            return {'tool': 'query_repo_changes', 'source': 'error', 'error': type(exc).__name__, 'summary': 'Repo lookup failed or GitLab project is not configured.'}
+
+    async def _run_action(self, incident_bundle: dict, action: dict[str, Any]) -> dict:
+        name = action.get('name')
+        if name in {'query_observability', 'query_metrics', 'search_logs'}:
+            return await self.query_observability(incident_bundle, action.get('input'))
+        if name in {'query_repo_changes', 'get_repo_changes'}:
+            return await self.query_repo_changes(incident_bundle, action.get('input'))
+        return {'tool': name or 'unknown', 'source': 'supervisor-agent', 'error': 'unknown tool'}
 
     def _incident_id(self, incident_bundle: dict) -> str:
         incident = normalize_incident_bundle(incident_bundle).get('incident', {})
@@ -219,6 +250,14 @@ class SupervisorAdvisor:
         try:
             bundle = _sanitize_bundle(normalize_incident_bundle(incident_bundle))
             memory_history = await self.memory.get_history(incident_id)
+            rag_query = json.dumps({'incident': bundle.get('incident'), 'alerts': bundle.get('alerts', [])[:3]}, default=str)
+            async with get_session_factory()() as rag_session:
+                similar_past_incidents = await self.rag.retrieve_similar_incidents(
+                    rag_session,
+                    query_text=rag_query,
+                    incident_id=incident_id,
+                    limit=5,
+                )
             observations: list[dict[str, Any]] = []
             final_decision: dict[str, Any] | None = None
             for iteration in range(1, max(1, REACT_MAX_ITERATIONS) + 1):
@@ -227,7 +266,7 @@ class SupervisorAdvisor:
                         'protocol': 'ReAct',
                         'required_response_json': {
                             'thought': 'brief private reasoning summary',
-                            'action': {'name': 'query_observability', 'input': 'optional query'},
+                            'action': {'name': 'query_observability|query_repo_changes', 'input': 'optional query or object'},
                             'final': {
                                 'root_cause': 'string',
                                 'confidence': 0.0,
@@ -239,6 +278,7 @@ class SupervisorAdvisor:
                         'rules': [
                             'Use at most one action per iteration.',
                             'If you need metrics/log context, return action.name=query_observability and omit final.',
+                            'If recent code changes could explain the incident, return action.name=query_repo_changes and omit final.',
                             'If enough context is available, omit action and return final.',
                             'Return JSON only.',
                         ],
@@ -249,6 +289,7 @@ class SupervisorAdvisor:
                         'alerts': bundle.get('alerts', []),
                         'timeline': bundle.get('timeline', []),
                         'similar_incidents': bundle.get('similar_incidents', []),
+                        'similar_past_incidents': similar_past_incidents,
                         'observations': observations,
                         'memory_history': memory_history,
                         'fallback': fallback,
@@ -260,7 +301,7 @@ class SupervisorAdvisor:
                     settings['provider'],
                     settings['model'],
                     [
-                        {'role': 'system', 'content': get_agent_system_prompt('supervisor')},
+                        {'role': 'system', 'content': get_agent_system_prompt('supervisor') + '\n\nSimilar past incidents from long-term memory:\n' + json.dumps(similar_past_incidents, default=str)},
                         {'role': 'user', 'content': prompt},
                     ],
                     temperature=0.1,
@@ -272,8 +313,8 @@ class SupervisorAdvisor:
                 action = step.get('action') if isinstance(step.get('action'), dict) else None
                 thought = str(step.get('thought') or '')
                 observation = None
-                if action and action.get('name') == 'query_observability':
-                    observation = await self.query_observability(incident_bundle, action.get('input'))
+                if action:
+                    observation = await self._run_action(incident_bundle, action)
                     observations.append(observation)
                     await self.memory.append(
                         incident_id,
@@ -301,10 +342,12 @@ class SupervisorAdvisor:
                 'llm_trace': {'status': 'ok', 'iterations': len(react_trace), 'calls': llm_traces},
                 'react_trace': react_trace,
                 'memory_key': incident_id,
+                'similar_past_incidents': similar_past_incidents,
             }
         except Exception as exc:  # noqa: BLE001
             logger.warning('supervisor_llm_fallback_used', extra={'provider': settings.get('provider'), 'model': settings.get('model'), 'error_type': type(exc).__name__})
             fallback['llm_trace'] = {'provider': settings.get('provider'), 'model': settings.get('model'), 'status': 'fallback', 'error': type(exc).__name__}
             fallback['react_trace'] = react_trace
             fallback['memory_key'] = incident_id
+            fallback.setdefault('similar_past_incidents', [])
             return fallback

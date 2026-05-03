@@ -4,6 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Index, Integer, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.types import UserDefinedType
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -11,6 +12,35 @@ from .database import Base
 
 def _enum_values(enum_class: type[enum.Enum]) -> list[str]:
     return [member.value for member in enum_class]
+
+
+
+
+class Vector(UserDefinedType):
+    cache_ok = True
+
+    def __init__(self, dimensions: int) -> None:
+        self.dimensions = dimensions
+
+    def get_col_spec(self, **_kw) -> str:
+        return f'vector({self.dimensions})'
+
+    def bind_processor(self, _dialect):
+        def process(value):
+            if value is None or isinstance(value, str):
+                return value
+            return '[' + ','.join(str(float(item)) for item in value) + ']'
+        return process
+
+    def result_processor(self, _dialect, _coltype):
+        def process(value):
+            if value is None or isinstance(value, list):
+                return value
+            text = str(value).strip('[]')
+            if not text:
+                return []
+            return [float(item) for item in text.split(',')]
+        return process
 
 
 class IncidentStatus(str, enum.Enum):
@@ -144,6 +174,27 @@ class IncidentEvent(Base):
     sequence_number: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     incident: Mapped['Incident'] = relationship(back_populates='events')
+
+
+class IncidentKnowledge(Base):
+    __tablename__ = 'incident_knowledge'
+    __table_args__ = (
+        Index('ix_incident_knowledge_incident_id', 'incident_id'),
+        Index('ix_incident_knowledge_service', 'service'),
+        Index('ix_incident_knowledge_created_at', 'created_at'),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    incident_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey('incidents.id', ondelete='CASCADE'), nullable=False)
+    service: Mapped[str | None] = mapped_column(Text)
+    severity: Mapped[str | None] = mapped_column(Text)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    root_cause: Mapped[str] = mapped_column(Text, nullable=False)
+    resolution: Mapped[str] = mapped_column(Text, nullable=False)
+    knowledge_metadata: Mapped[dict] = mapped_column('metadata', JSONB, nullable=False, default=dict)
+    embedding: Mapped[list[float]] = mapped_column(Vector(384), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
 class AISettings(Base):

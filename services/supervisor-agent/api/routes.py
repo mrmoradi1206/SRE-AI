@@ -6,6 +6,7 @@ import time
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +28,7 @@ from aiops_shared.queue import enqueue_job
 
 from core.analyzer import AnalysisService
 from core.memory import ReActMemory
+from core.rag import IncidentRAG
 from core.config import (
     HISTORY_AGENT_URL,
     HTTP_BACKOFF_SECONDS,
@@ -42,6 +44,16 @@ router = APIRouter(prefix='/supervisor')
 plain_router = APIRouter()
 service = AnalysisService()
 react_memory = ReActMemory()
+incident_rag = IncidentRAG()
+
+
+class IncidentApproveIn(BaseModel):
+    root_cause: str = Field(min_length=3, max_length=8000)
+    resolution: str = Field(min_length=3, max_length=8000)
+    summary: str | None = Field(default=None, max_length=2000)
+    service: str | None = Field(default=None, max_length=200)
+    severity: str | None = Field(default=None, max_length=80)
+
 http_client = AsyncServiceClient(
     timeout=HTTP_TIMEOUT,
     max_retries=HTTP_MAX_RETRIES,
@@ -458,6 +470,32 @@ async def queue_analyze(payload: SupervisorAnalyzeIn, request: Request, idempote
 
 
 
+
+
+def _service_from_bundle(bundle: dict) -> str | None:
+    alerts = bundle.get('alerts') or []
+    latest = alerts[0].get('payload', {}) if alerts else {}
+    labels = latest.get('labels', {}) if isinstance(latest, dict) else {}
+    return labels.get('service') or labels.get('job') or labels.get('app') or labels.get('alertname')
+
+
+def _rag_query_from_bundle(bundle: dict) -> str:
+    incident = bundle.get('incident', {})
+    alerts = bundle.get('alerts', [])[:3]
+    return json.dumps({'incident': incident, 'alerts': alerts}, default=str)
+
+
+async def _similar_incidents_payload(session: AsyncSession, incident_id: str, limit: int = 5) -> dict:
+    response = await http_client.get(f'{HISTORY_AGENT_URL}/incidents/{incident_id}')
+    bundle = normalize_incident_bundle(response.json())
+    items = await incident_rag.retrieve_similar_incidents(
+        session,
+        query_text=_rag_query_from_bundle(bundle),
+        incident_id=incident_id,
+        limit=limit,
+    )
+    return {'incident_id': incident_id, 'items': items, 'count': len(items)}
+
 async def _incident_trace_payload(incident_id: str) -> dict:
     history = await react_memory.get_history(incident_id, limit=50)
     return {
@@ -472,6 +510,31 @@ async def _incident_trace_payload(incident_id: str) -> dict:
 async def incident_trace_v1(incident_id: str) -> dict:
     return await _incident_trace_payload(incident_id)
 
+
+
+@plain_router.get('/api/v1/incidents/{incident_id}/similar')
+async def incident_similar_v1(incident_id: str, session: AsyncSession = Depends(get_db)) -> dict:
+    return await _similar_incidents_payload(session, incident_id)
+
+
+@plain_router.post('/api/v1/incidents/{incident_id}/approve')
+async def approve_incident_v1(incident_id: str, payload: IncidentApproveIn, request: Request, session: AsyncSession = Depends(get_db)) -> dict:
+    response = await http_client.get(f'{HISTORY_AGENT_URL}/incidents/{incident_id}')
+    bundle = normalize_incident_bundle(response.json())
+    incident = bundle.get('incident', {})
+    saved = await incident_rag.save_resolved_incident(
+        session,
+        incident_id=incident_id,
+        summary=payload.summary or incident.get('summary') or incident.get('fingerprint') or 'Approved incident',
+        root_cause=payload.root_cause,
+        resolution=payload.resolution,
+        service=payload.service or _service_from_bundle(bundle),
+        severity=payload.severity or incident.get('severity'),
+        metadata=_metadata(request) | {'approved_by': 'human-sre'},
+    )
+    await session.commit()
+    return {'saved': True, 'knowledge': saved}
+
 @router.get('/incidents/{incident_id}')
 async def supervisor_view(incident_id: str) -> dict:
     response = await http_client.get(f'{HISTORY_AGENT_URL}/incidents/{incident_id}')
@@ -483,6 +546,17 @@ async def supervisor_view(incident_id: str) -> dict:
 @router.get('/incidents/{incident_id}/trace')
 async def supervisor_incident_trace(incident_id: str) -> dict:
     return await _incident_trace_payload(incident_id)
+
+
+
+@router.get('/incidents/{incident_id}/similar')
+async def supervisor_incident_similar(incident_id: str, session: AsyncSession = Depends(get_db)) -> dict:
+    return await _similar_incidents_payload(session, incident_id)
+
+
+@router.post('/incidents/{incident_id}/approve')
+async def supervisor_incident_approve(incident_id: str, payload: IncidentApproveIn, request: Request, session: AsyncSession = Depends(get_db)) -> dict:
+    return await approve_incident_v1(incident_id, payload, request, session)
 
 @router.get('/settings', response_model=AISettingsOut)
 async def get_settings(session: AsyncSession = Depends(get_db)) -> AISettingsOut:
