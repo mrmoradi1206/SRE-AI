@@ -349,7 +349,7 @@ Example config shape is:
 {
   "providers": ["openrouter", "llmgateway", "gapgpt"],
   "models": {
-    "openrouter": ["meta-llama/llama-3.1-8b-instruct", "qwen/qwen-2.5-72b-instruct"],
+    "openrouter": ["openai/gpt-4o-mini", "anthropic/claude-sonnet-4.5", "google/gemini-2.5-pro"],
     "llmgateway": ["zai/glm-5.1"],
     "gapgpt": ["gapgpt-qwen-3.5", "gapgpt-qwen-3.6", "gpt-5.2", "gemini-3-pro-preview"]
   },
@@ -377,6 +377,8 @@ The `/settings` UI can edit provider/model routes, each LLM-backed agent system 
 OpenRouter is configured to use `http://185.255.89.232:5070` by default. To change it in the UI, open `/settings`, edit **Provider networking -> OpenRouter -> HTTP/SOCKS proxy URL**, then save provider settings. Leave the proxy field blank to send provider traffic directly. Environment variables such as `OPENROUTER_PROXY_URL` or `LLM_PROXY_URL` override the file-backed UI setting.
 
 The committed GapGPT model list is populated from `GET https://api.gapgpt.app/v1/models` so the `/settings` model dropdown includes all currently advertised GapGPT model IDs, including chat, image, audio, embedding, and TTS models. Some non-chat models may not work for supervisor/report chat-completion calls.
+
+The committed OpenRouter model list is populated from `GET https://openrouter.ai/api/v1/models` so the `/settings` model dropdown includes all currently advertised OpenRouter model IDs. OpenRouter publishes some free, preview, image, and non-chat variants; use chat-completion capable models for supervisor/report routes.
 
 There is no history model setting by design. `history-agent` is deterministic and does not call an LLM; it verifies webhooks, deduplicates alerts, persists the append-only timeline, and serves incident context. Only `supervisor-agent` and `report-agent` use model routing.
 
