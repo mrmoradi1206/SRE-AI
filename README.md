@@ -4,7 +4,9 @@ SRE-AI is a Docker-first, multi-agent incident platform:
 
 - `history-agent`: receives and deduplicates incoming alerts, stores incidents/events, and provides history APIs
 - `report-agent`: generates incident reports from supervisor context
-- `supervisor-agent`: owns incident lifecycle transitions and AI analysis
+- `supervisor-agent`: owns incident lifecycle transitions and ReAct-style AI analysis
+- `observability-agent`: scaffolded metrics/log query API for supervisor tool calls
+- `redis`: short-lived ReAct memory for supervisor reasoning sessions
 - `postgres`: durable storage
 - `nginx`: reverse proxy, API facade, and React UI host
 - `prometheus`, `alertmanager`, `node-exporter`, and `grafana` for observability
@@ -19,6 +21,7 @@ Everything is wired for local/VM deployment with one compose file.
 - `services/history-agent/` service implementation, tests entrypoints, and local README
 - `services/report-agent/` service implementation and local README
 - `services/supervisor-agent/` service implementation and local README
+- `services/observability-agent/` scaffolded FastAPI observability API
 - `services/nginx/` reverse-proxy and Vite React UI
 - `shared/` shared models, database helpers, schemas, and clients
 - `infra/postgres/` DB bootstrap + migrations
@@ -146,14 +149,21 @@ nginx :8080
         |       - appends immutable history events
         |       - queues supervisor.analyze jobs
         |
+        +--> redis :6379
+        |       - stores supervisor ReAct memory for 24 hours
+        |
         +--> /api/supervisor/*, /api/config/*, /api/test-workflow
         |       |
         |       v
         |   supervisor-agent :8003
         |       - loads incident context from history-agent
-        |       - calls the configured LLM with the editable system prompt
+        |       - runs a Thought -> Action -> Observation loop
+        |       - can call query_observability against observability-agent
         |       - records recommended actions and safe lifecycle transitions
         |       - calls report-agent after queued analysis
+        |
+        +--> observability-agent :8003
+        |       - exposes /api/v1/query for tool-call experiments
         |
         +--> /api/report/*
                 |
@@ -209,6 +219,8 @@ agents -> postgres
 | history-agent | `8001` | `GET /health`, `GET /ready`, plus incident APIs |
 | report-agent | `8002` | `GET /health`, `GET /ready`, report generation/retrieval APIs |
 | supervisor-agent | `8003` | `GET /health`, `GET /ready`, lifecycle & config APIs |
+| observability-agent | `8004` host -> `8003` container | `GET /health`, `POST /api/v1/query` |
+| redis | `6379` (or `REDIS_PORT`) | ReAct memory store |
 | nginx UI/API | `8080` (or `NGINX_PORT`) | Browser UI + API facade |
 | prometheus | `9090` (or `PROMETHEUS_PORT`) | scrape UI and metrics rules UI |
 | alertmanager | `9093` (or `ALERTMANAGER_PORT`) | alerting UI and silence/group view |

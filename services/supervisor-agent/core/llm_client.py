@@ -1,10 +1,16 @@
 import json
 import logging
 import re
+from typing import Any
+
+import httpx
 
 from aiops_shared.context_loader import normalize_incident_bundle
 from aiops_shared.llm_client import run_llm
 from aiops_shared.llm_config import get_agent_system_prompt
+
+from .config import OBSERVABILITY_AGENT_URL, REACT_MAX_ITERATIONS
+from .memory import ReActMemory
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +93,45 @@ class CMDBEnricher:
 class SupervisorAdvisor:
     def __init__(self) -> None:
         self.cmdb = CMDBEnricher()
+        self.memory = ReActMemory()
+
+    async def query_observability(self, incident_bundle: dict, query: str | dict | None = None) -> dict:
+        bundle = normalize_incident_bundle(incident_bundle)
+        incident = bundle.get('incident', {})
+        alerts = bundle.get('alerts', [])
+        latest_payload = alerts[-1].get('payload', {}) if alerts else {}
+        labels = latest_payload.get('labels', {}) if isinstance(latest_payload, dict) else {}
+        signal = query if query else labels.get('alertname') or incident.get('summary') or 'incident-health'
+        payload = {
+            'query': signal if isinstance(signal, str) else json.dumps(signal, default=str),
+            'datasource': 'mock',
+            'incident_id': str(incident.get('id') or ''),
+        }
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(f'{OBSERVABILITY_AGENT_URL.rstrip("/")}/api/v1/query', json=payload)
+            response.raise_for_status()
+            data = response.json()
+            return {'tool': 'query_observability', 'source': 'observability-agent', **data}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('query_observability_mock_fallback', extra={'error_type': type(exc).__name__})
+        return {
+            'tool': 'query_observability',
+            'source': 'mock',
+            'observability_agent_url': OBSERVABILITY_AGENT_URL,
+            'query': signal,
+            'summary': 'Mock observability data indicates elevated error/latency signals for the affected service.',
+            'metrics': {
+                'service': labels.get('service') or labels.get('job') or 'unknown',
+                'severity': incident.get('severity') or latest_payload.get('severity') or 'unknown',
+                'alert_count': len(alerts),
+                'sample_window': '15m',
+            },
+        }
+
+    def _incident_id(self, incident_bundle: dict) -> str:
+        incident = normalize_incident_bundle(incident_bundle).get('incident', {})
+        return str(incident.get('id') or incident.get('fingerprint') or 'unknown')
 
     def build_fallback_decision(self, incident_bundle: dict, settings: dict, reasoning_mode: str = 'balanced') -> dict:
         bundle = normalize_incident_bundle(incident_bundle)
@@ -143,45 +188,123 @@ class SupervisorAdvisor:
             'context_enrichment': enrichment,
         }
 
+    def _coerce_final_decision(self, raw: dict[str, Any], fallback: dict) -> dict:
+        decision = raw.get('final') if isinstance(raw.get('final'), dict) else raw
+        return {
+            'root_cause': decision.get('root_cause', fallback['root_cause']),
+            'confidence': float(decision.get('confidence', fallback['confidence'])),
+            'recommended_actions': decision.get('recommended_actions', fallback['recommended_actions']),
+            'next_state': decision.get('next_state', fallback['next_state']),
+            'reasoning_trace': decision.get('reasoning_trace', fallback['reasoning_trace']),
+        }
+
+    def _parse_react_step(self, content: str) -> dict[str, Any]:
+        text = content.strip()
+        if text.startswith('```'):
+            text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.IGNORECASE)
+            text = re.sub(r'\s*```$', '', text)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            match = re.search(r'\{.*\}', text, flags=re.DOTALL)
+            if not match:
+                raise
+            return json.loads(match.group(0))
+
     async def build_decision(self, incident_bundle: dict, settings: dict, reasoning_mode: str = 'balanced') -> dict:
         fallback = self.build_fallback_decision(incident_bundle, settings, reasoning_mode=reasoning_mode)
+        incident_id = self._incident_id(incident_bundle)
+        react_trace: list[dict[str, Any]] = []
+        llm_traces: list[dict[str, Any]] = []
         try:
             bundle = _sanitize_bundle(normalize_incident_bundle(incident_bundle))
-            prompt = json.dumps(
-                {
-                    'reasoning_mode': reasoning_mode,
-                    'incident': bundle.get('incident', {}),
-                    'alerts': bundle.get('alerts', []),
-                    'timeline': bundle.get('timeline', []),
-                    'similar_incidents': bundle.get('similar_incidents', []),
-                    'fallback': fallback,
-                    'request': 'Analyze the incident, request more context when useful, and recommend the next safe lifecycle state.',
-                },
-                default=str,
-            )
-            response = await run_llm(
-                settings['provider'],
-                settings['model'],
-                [
-                    {'role': 'system', 'content': get_agent_system_prompt('supervisor')},
-                    {'role': 'user', 'content': prompt},
-                ],
-                temperature=0.1,
-                max_tokens=500,
-            )
-            decision = json.loads(response['content'])
+            memory_history = await self.memory.get_history(incident_id)
+            observations: list[dict[str, Any]] = []
+            final_decision: dict[str, Any] | None = None
+            for iteration in range(1, max(1, REACT_MAX_ITERATIONS) + 1):
+                prompt = json.dumps(
+                    {
+                        'protocol': 'ReAct',
+                        'required_response_json': {
+                            'thought': 'brief private reasoning summary',
+                            'action': {'name': 'query_observability', 'input': 'optional query'},
+                            'final': {
+                                'root_cause': 'string',
+                                'confidence': 0.0,
+                                'recommended_actions': [{'priority': 1, 'action': 'string'}],
+                                'next_state': 'open|investigating|mitigating|resolved|closed',
+                                'reasoning_trace': 'short trace',
+                            },
+                        },
+                        'rules': [
+                            'Use at most one action per iteration.',
+                            'If you need metrics/log context, return action.name=query_observability and omit final.',
+                            'If enough context is available, omit action and return final.',
+                            'Return JSON only.',
+                        ],
+                        'iteration': iteration,
+                        'max_iterations': REACT_MAX_ITERATIONS,
+                        'reasoning_mode': reasoning_mode,
+                        'incident': bundle.get('incident', {}),
+                        'alerts': bundle.get('alerts', []),
+                        'timeline': bundle.get('timeline', []),
+                        'similar_incidents': bundle.get('similar_incidents', []),
+                        'observations': observations,
+                        'memory_history': memory_history,
+                        'fallback': fallback,
+                        'request': 'Analyze the incident and recommend the next safe lifecycle state.',
+                    },
+                    default=str,
+                )
+                response = await run_llm(
+                    settings['provider'],
+                    settings['model'],
+                    [
+                        {'role': 'system', 'content': get_agent_system_prompt('supervisor')},
+                        {'role': 'user', 'content': prompt},
+                    ],
+                    temperature=0.1,
+                    max_tokens=700,
+                )
+                if response.get('trace'):
+                    llm_traces.append(response['trace'])
+                step = self._parse_react_step(response['content'])
+                action = step.get('action') if isinstance(step.get('action'), dict) else None
+                thought = str(step.get('thought') or '')
+                observation = None
+                if action and action.get('name') == 'query_observability':
+                    observation = await self.query_observability(incident_bundle, action.get('input'))
+                    observations.append(observation)
+                    await self.memory.append(
+                        incident_id,
+                        {'iteration': iteration, 'thought': thought, 'action': action, 'observation': observation},
+                    )
+                    react_trace.append({'iteration': iteration, 'thought': thought, 'action': action, 'observation': observation})
+                    continue
+
+                final_decision = self._coerce_final_decision(step, fallback)
+                react_trace.append({'iteration': iteration, 'thought': thought, 'action': action, 'final': final_decision})
+                await self.memory.append(incident_id, {'iteration': iteration, 'thought': thought, 'final': final_decision})
+                break
+
+            if final_decision is None:
+                observation_text = '; '.join(str(item.get('summary', '')) for item in observations if isinstance(item, dict))
+                final_decision = fallback | {
+                    'reasoning_trace': f"{fallback['reasoning_trace']} | react_max_iterations_reached | observations={observation_text}".strip(' |'),
+                }
+
             return {
-                'root_cause': decision.get('root_cause', fallback['root_cause']),
-                'confidence': float(decision.get('confidence', fallback['confidence'])),
-                'recommended_actions': decision.get('recommended_actions', fallback['recommended_actions']),
-                'next_state': decision.get('next_state', fallback['next_state']),
-                'reasoning_trace': decision.get('reasoning_trace', fallback['reasoning_trace']),
+                **final_decision,
                 'provider': response['provider'],
                 'model': response['model'],
                 'context_enrichment': fallback['context_enrichment'],
-                'llm_trace': response.get('trace'),
+                'llm_trace': {'status': 'ok', 'iterations': len(react_trace), 'calls': llm_traces},
+                'react_trace': react_trace,
+                'memory_key': incident_id,
             }
         except Exception as exc:  # noqa: BLE001
             logger.warning('supervisor_llm_fallback_used', extra={'provider': settings.get('provider'), 'model': settings.get('model'), 'error_type': type(exc).__name__})
             fallback['llm_trace'] = {'provider': settings.get('provider'), 'model': settings.get('model'), 'status': 'fallback', 'error': type(exc).__name__}
+            fallback['react_trace'] = react_trace
+            fallback['memory_key'] = incident_id
             return fallback

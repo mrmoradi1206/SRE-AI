@@ -29,6 +29,8 @@ class AnalysisService:
             decision['recommended_actions'] = []
         if not isinstance(decision.get('requested_context'), list):
             decision['requested_context'] = []
+        if not isinstance(decision.get('react_trace'), list):
+            decision['react_trace'] = []
         normalized = SupervisorDecisionOut(
             root_cause=str(decision.get('root_cause') or 'No root cause identified.'),
             confidence=decision['confidence'],
@@ -80,6 +82,7 @@ class AnalysisService:
                 'root_cause': decision['root_cause'],
                 'recommended_actions': decision['recommended_actions'],
                 'requested_context': decision.get('requested_context', []),
+                'react_trace': decision.get('react_trace', []),
             },
             metadata=metadata | {
                 'reasoning_output': decision,
