@@ -117,19 +117,20 @@ class SupervisorAdvisor:
         observations: dict[str, Any] = {'tool': 'query_observability', 'source': 'observability-agent', 'service': service}
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
-                metrics_response = await client.post(
-                    f'{OBSERVABILITY_AGENT_URL.rstrip("/")}/api/v1/metrics/query',
-                    json={'query': str(promql), 'incident_id': incident_id},
+                analysis_response = await client.post(
+                    f'{OBSERVABILITY_AGENT_URL.rstrip("/")}/api/v1/analyze',
+                    json={
+                        'incident_id': incident_id,
+                        'incident': incident,
+                        'alerts': bundle.get('alerts', []),
+                        'service': service,
+                        'promql': str(promql),
+                        'minutes': 60,
+                    },
                 )
-                metrics_response.raise_for_status()
-                observations['metrics'] = metrics_response.json()
-                logs_response = await client.get(
-                    f'{OBSERVABILITY_AGENT_URL.rstrip("/")}/api/v1/logs/errors',
-                    params={'service': service if service != 'unknown' else '', 'minutes': 60},
-                )
-                if logs_response.status_code < 500:
-                    observations['logs'] = logs_response.json()
-            observations['summary'] = 'Collected live Prometheus metrics and recent error-log context.'
+                analysis_response.raise_for_status()
+                observations['agent_response'] = analysis_response.json()
+            observations['summary'] = 'Collected observability-agent LLM analysis with Prometheus metrics and recent error-log context.'
             return observations
         except Exception as exc:  # noqa: BLE001
             logger.warning('query_observability_failed', extra={'error_type': type(exc).__name__})
@@ -144,8 +145,19 @@ class SupervisorAdvisor:
         if ref:
             params['ref'] = ref
         try:
+            bundle = normalize_incident_bundle(incident_bundle)
+            incident = bundle.get('incident', {})
             async with httpx.AsyncClient(timeout=8.0) as client:
-                response = await client.get(f'{REPO_AGENT_URL.rstrip("/")}/api/v1/repo/changes', params=params)
+                response = await client.post(
+                    f'{REPO_AGENT_URL.rstrip("/")}/api/v1/analyze',
+                    json={
+                        'incident_id': str(incident.get('id') or ''),
+                        'incident': incident,
+                        'alerts': bundle.get('alerts', []),
+                        'service': self._service_name(incident_bundle),
+                        **params,
+                    },
+                )
             response.raise_for_status()
             return {'tool': 'query_repo_changes', 'source': 'repo-agent', **response.json()}
         except Exception as exc:  # noqa: BLE001

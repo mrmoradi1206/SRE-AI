@@ -5,8 +5,8 @@ SRE-AI is a Docker-first, multi-agent incident platform:
 - `history-agent`: receives and deduplicates incoming alerts, stores incidents/events, and provides history APIs
 - `report-agent`: generates incident reports from supervisor context
 - `supervisor-agent`: owns incident lifecycle transitions and ReAct-style AI analysis
-- `observability-agent`: Prometheus/Elasticsearch query API for supervisor tool calls and UI drilldowns
-- `repo-agent`: GitLab commits/MRs lookup API for incident context
+- `observability-agent`: LLM-backed Prometheus/Elasticsearch analysis agent for supervisor tool calls and UI drilldowns
+- `repo-agent`: LLM-backed GitLab commits/MRs analysis agent for incident context
 - `redis`: short-lived ReAct memory for supervisor reasoning sessions
 - `pgvector`: long-term incident knowledge/RAG memory in Postgres
 - `postgres`: durable storage
@@ -284,12 +284,14 @@ All frontend/API traffic is served through one listener, prefixed by `/api`:
   - `PUT /api/observability/api/v1/config`
   - `POST /api/observability/api/v1/test/prometheus`
   - `POST /api/observability/api/v1/test/elasticsearch`
+  - `POST /api/observability/api/v1/analyze`
   - `POST /api/observability/api/v1/metrics/query`
   - `GET /api/observability/api/v1/logs/errors?service=<service>&minutes=60`
   - `GET /api/repo/health`
   - `GET /api/repo/api/v1/config`
   - `PUT /api/repo/api/v1/config`
   - `POST /api/repo/api/v1/test/gitlab`
+  - `POST /api/repo/api/v1/analyze`
   - `GET /api/repo/api/v1/repo/changes`
 
 ### ReAct trace and integration UI
@@ -299,6 +301,7 @@ All frontend/API traffic is served through one listener, prefixed by `/api`:
 - UI/API facade endpoint: `GET /api/supervisor/incidents/{incident_id}/trace`.
 - The incident detail page polls this trace every 3 seconds while the incident status is `investigating`.
 - The incident detail page also includes widgets for PromQL results, Elasticsearch error logs/stack traces, and recent GitLab commits/MRs.
+- `observability-agent` and `repo-agent` have their own LLM routes and editable system prompts in `/settings`; supervisor calls their `/api/v1/analyze` endpoints as agent-to-agent tools.
 - Human SREs can click **Approve & Learn** to edit the final root cause/resolution and save it to `incident_knowledge` for future retrieval.
 - The `/integrations` page lets operators set Prometheus URL, Elasticsearch URL/index, GitLab URL/token/project, and run connection tests without rebuilding containers. These values are saved under `config/observability_integrations.json` and `config/repo_integrations.json` on the mounted config volume.
 
@@ -400,7 +403,7 @@ The incident detail page uses these settings when fetching PromQL samples, recen
 
 You can:
 
-- update routing through UI (`/settings`) with `POST /api/config/llm`
+- update routing through UI (`/settings`) with `POST /api/config/llm` for `supervisor`, `report`, `observability`, and `repo` agents
 - test provider-route per agent using `POST /api/config/llm/test/{agent}`
 - persist API keys in ignored runtime secrets using `POST /api/config/llm/secrets`
 - check provider readiness with `GET /api/config/llm/secrets`

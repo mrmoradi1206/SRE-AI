@@ -5,6 +5,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN useradd --create-home --shell /bin/bash appuser
 
+WORKDIR /app
+COPY shared /app/shared
 WORKDIR /app/services/repo-agent
 COPY services/repo-agent/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --upgrade pip \
