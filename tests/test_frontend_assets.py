@@ -19,7 +19,8 @@ def test_ui_contains_dashboard_and_search_assets():
     assert 'Delete Incident' in app
     assert 'Delete event' in app
     assert '/report/integrations/mattermost' in app
-    assert 'Why there is no history model' in app
+    assert 'Why there is no history model' not in app
+    assert 'Examples: http://185.255.89.232:5070, socks5://127.0.0.1:1080' not in app
     assert 'Write the system prompt this agent sends to its model' in app
     assert 'Saved with the model route and used on the next LLM call.' in app
     assert 'Provider networking' in app

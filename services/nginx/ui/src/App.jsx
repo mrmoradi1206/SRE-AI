@@ -1161,21 +1161,6 @@ function SettingsPage() {
         </div>
       </div>
 
-      <div className="panel span-2">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">History node</p>
-            <h3>Why there is no history model</h3>
-          </div>
-          <StatusChip status="resolved" />
-        </div>
-        <p>
-          The history-agent is intentionally deterministic: it verifies webhooks, deduplicates alerts, writes the
-          append-only timeline, and serves incident context. It does not call an LLM, so there is no model route to
-          configure. Supervisor and report are the only LLM-backed nodes.
-        </p>
-      </div>
-
       {agents.map((agent) => {
         const selection = draft.agents[agent];
         const models = draft.models[selection.provider] || [];
@@ -1257,7 +1242,6 @@ function SettingsPage() {
               </label>
               <label>
                 HTTP/SOCKS proxy URL
-                <span className="field-hint">Examples: http://185.255.89.232:5070, socks5://127.0.0.1:1080</span>
                 <input
                   value={settings.proxy_url || ''}
                   onChange={(event) => updateProviderSetting(provider, 'proxy_url', event.target.value)}
