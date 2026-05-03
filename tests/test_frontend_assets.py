@@ -17,6 +17,9 @@ def test_ui_contains_dashboard_and_search_assets():
     assert 'Why there is no history model' in app
     assert 'Write the system prompt this agent sends to its model' in app
     assert 'Saved with the model route and used on the next LLM call.' in app
+    assert 'Provider networking' in app
+    assert 'HTTP/SOCKS proxy URL' in app
+    assert 'http://185.255.89.232:5070' in app
     assert 'Test LLM call' in app
     assert 'Runtime API keys' in app
     assert 'location = /api/alertmanager/webhook' in nginx_conf

@@ -976,6 +976,19 @@ function SettingsPage() {
     }));
   };
 
+  const updateProviderSetting = (provider, key, value) => {
+    setDraft((current) => ({
+      ...current,
+      provider_settings: {
+        ...(current.provider_settings || {}),
+        [provider]: {
+          ...((current.provider_settings || {})[provider] || {}),
+          [key]: value,
+        },
+      },
+    }));
+  };
+
   const save = async () => {
     setMessage('');
     setError('');
@@ -1101,6 +1114,49 @@ function SettingsPage() {
           </article>
         );
       })}
+
+      <div className="panel span-2">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Provider networking</p>
+            <h3>Base URLs and proxies</h3>
+          </div>
+          <button type="button" className="ghost-button" onClick={save}>Save Provider Settings</button>
+        </div>
+        <p>
+          Route LLM provider traffic through a proxy when the server cannot reach the provider directly. OpenRouter is
+          prefilled with `http://185.255.89.232:5070`; clear the field to disable the proxy.
+        </p>
+        <div className="secret-grid">
+          {Object.entries(draft.provider_settings || {}).map(([provider, settings]) => (
+            <div key={provider} className="copy-card provider-settings-card">
+              <div className="panel-header compact">
+                <div>
+                  <p className="eyebrow">{providerLabel(provider)}</p>
+                  <h3>{settings.default_model || 'default model'}</h3>
+                </div>
+              </div>
+              <label>
+                API base URL
+                <input
+                  value={settings.base_url || ''}
+                  onChange={(event) => updateProviderSetting(provider, 'base_url', event.target.value)}
+                  placeholder="https://provider.example/v1"
+                />
+              </label>
+              <label>
+                HTTP/SOCKS proxy URL
+                <span className="field-hint">Examples: http://185.255.89.232:5070, socks5://127.0.0.1:1080</span>
+                <input
+                  value={settings.proxy_url || ''}
+                  onChange={(event) => updateProviderSetting(provider, 'proxy_url', event.target.value)}
+                  placeholder="Leave empty for direct provider access"
+                />
+              </label>
+            </div>
+          ))}
+        </div>
+      </div>
 
       <div className="panel span-2">
         <div className="panel-header">

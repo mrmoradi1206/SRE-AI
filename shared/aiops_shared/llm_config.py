@@ -23,16 +23,19 @@ PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
         'base_url': 'https://openrouter.ai/api/v1',
         'api_key_env': 'OPENROUTER_API_KEY',
         'default_model': 'openai/gpt-4o-mini',
+        'proxy_url': 'http://185.255.89.232:5070',
     },
     'llmgateway': {
         'base_url': 'https://llm.snapp.tech/v1',
         'api_key_env': 'LLM_GATEWAY_API_KEY',
         'default_model': 'zai/glm-5.1',
+        'proxy_url': '',
     },
     'gapgpt': {
         'base_url': 'https://api.gapgpt.app/v1',
         'api_key_env': 'GAPGPT_API_KEY',
         'default_model': 'gapgpt-qwen-3.5',
+        'proxy_url': '',
     },
 }
 
@@ -89,6 +92,25 @@ def _clean_prompt(value: Any, field: str) -> str:
     return cleaned
 
 
+def _clean_proxy_url(value: Any, field: str) -> str:
+    if value is None:
+        return ''
+    if not isinstance(value, str):
+        raise LLMConfigError(f'{field} must be a string')
+    cleaned = value.strip()
+    if not cleaned:
+        return ''
+    if '://' not in cleaned:
+        cleaned = f'http://{cleaned}'
+    if (
+        len(cleaned) > 2048
+        or any(ch in cleaned for ch in ['\n', '\r', '\x00'])
+        or not cleaned.startswith(('http://', 'https://', 'socks5://', 'socks5h://'))
+    ):
+        raise LLMConfigError(f'{field} is invalid')
+    return cleaned.rstrip('/')
+
+
 def validate_llm_config(config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(config, dict):
         raise LLMConfigError('config must be an object')
@@ -131,12 +153,14 @@ def validate_llm_config(config: dict[str, Any]) -> dict[str, Any]:
         base_url = _clean_string(values.get('base_url', defaults['base_url']), f'provider_settings.{provider}.base_url')
         api_key_env = _clean_string(values.get('api_key_env', defaults['api_key_env']), f'provider_settings.{provider}.api_key_env')
         default_model = _clean_string(values.get('default_model', defaults['default_model']), f'provider_settings.{provider}.default_model')
+        proxy_url = _clean_proxy_url(values.get('proxy_url', defaults.get('proxy_url', '')), f'provider_settings.{provider}.proxy_url')
         if default_model not in models[provider]:
             default_model = models[provider][0]
         provider_settings[provider] = {
             'base_url': base_url.rstrip('/'),
             'api_key_env': api_key_env,
             'default_model': default_model,
+            'proxy_url': proxy_url,
         }
 
     raw_agents = config.get('agents', {})

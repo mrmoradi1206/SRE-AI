@@ -357,7 +357,8 @@ Example config shape is:
     "openrouter": {
       "base_url": "https://openrouter.ai/api/v1",
       "api_key_env": "OPENROUTER_API_KEY",
-      "default_model": "openai/gpt-4o-mini"
+      "default_model": "openai/gpt-4o-mini",
+      "proxy_url": "http://185.255.89.232:5070"
     }
   },
   "agents": {
@@ -371,7 +372,9 @@ Example config shape is:
 }
 ```
 
-The `/settings` UI can edit both the provider/model route and each LLM-backed agent system prompt. Prompt changes are saved to `config/llm_config.json` and take effect on the next LLM call without rebuilding containers.
+The `/settings` UI can edit provider/model routes, each LLM-backed agent system prompt, provider base URLs, and per-provider proxy URLs. Prompt and proxy changes are saved to `config/llm_config.json` and take effect on the next LLM call without rebuilding containers.
+
+OpenRouter is configured to use `http://185.255.89.232:5070` by default. To change it in the UI, open `/settings`, edit **Provider networking -> OpenRouter -> HTTP/SOCKS proxy URL**, then save provider settings. Leave the proxy field blank to send provider traffic directly. Environment variables such as `OPENROUTER_PROXY_URL` or `LLM_PROXY_URL` override the file-backed UI setting.
 
 There is no history model setting by design. `history-agent` is deterministic and does not call an LLM; it verifies webhooks, deduplicates alerts, persists the append-only timeline, and serves incident context. Only `supervisor-agent` and `report-agent` use model routing.
 
@@ -395,6 +398,7 @@ There is no history model setting by design. `history-agent` is deterministic an
   - `DEFAULT_SLA_HOURS`, `REOPEN_STALE_AFTER_HOURS`
 - LLM and HTTP
   - `AI_PROVIDER`, `AI_MODEL`, provider keys/base URLs
+  - `OPENROUTER_PROXY_URL`, `LLM_GATEWAY_PROXY_URL`, `GAPGPT_PROXY_URL`, `LLM_PROXY_URL`
   - `HTTP_TIMEOUT`, `HTTP_MAX_RETRIES`, `HTTP_BACKOFF_SECONDS`
   - `HTTP_CIRCUIT_BREAKER_THRESHOLD`, `HTTP_CIRCUIT_BREAKER_RESET_SECONDS`
   - `LLM_CONFIG_PATH`, `LLM_RUNTIME_SECRETS_PATH`

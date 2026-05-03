@@ -95,6 +95,26 @@ def _base_url(provider: str) -> str:
     return os.getenv('LLM_GATEWAY_BASE_URL') or os.getenv('SNAPP_LLM_BASE_URL', 'https://llm.snapp.tech/v1').rstrip('/')
 
 
+def _proxy_url(provider: str) -> str | None:
+    env_map = {
+        'openrouter': 'OPENROUTER_PROXY_URL',
+        'gapgpt': 'GAPGPT_PROXY_URL',
+        'llmgateway': 'LLM_GATEWAY_PROXY_URL',
+    }
+    configured = os.getenv(env_map.get(provider, ''), '') or os.getenv('LLM_PROXY_URL', '')
+    if not configured:
+        try:
+            configured = get_provider_settings(provider).get('proxy_url', '')
+        except LLMConfigError:
+            configured = ''
+    cleaned = configured.strip()
+    if not cleaned:
+        return None
+    if '://' not in cleaned:
+        cleaned = f'http://{cleaned}'
+    return cleaned
+
+
 def _headers(provider: str, api_key: str) -> dict[str, str]:
     headers = {
         'Authorization': f'Bearer {api_key}',
@@ -132,6 +152,7 @@ def _trace_payload(
     duration_ms: float,
     response_content: str | None = None,
     error: str | None = None,
+    proxy_configured: bool = False,
 ) -> dict[str, Any]:
     trace = {
         'provider': provider,
@@ -143,6 +164,7 @@ def _trace_payload(
             'temperature': payload.get('temperature'),
             'max_tokens': payload.get('max_tokens'),
         },
+        'proxy_configured': proxy_configured,
     }
     if error:
         trace['error'] = _preview(error, limit=320)
@@ -191,10 +213,18 @@ async def _run_gapgpt(
     except ImportError as exc:
         raise LLMError(selected_provider, selected_model, 'openai package is not installed') from exc
 
-    cache_key = f'{selected_provider}:{api_key[:8]}'
+    proxy_url = _proxy_url(selected_provider)
+    cache_key = f'{selected_provider}:{api_key[:8]}:{_base_url(selected_provider)}:{proxy_url or ""}'
     client = _gapgpt_client_cache.get(cache_key)
     if client is None:
-        client = AsyncOpenAI(api_key=api_key, base_url=_base_url(selected_provider), timeout=request_timeout, max_retries=0)
+        http_client = httpx.AsyncClient(timeout=request_timeout, proxy=proxy_url) if proxy_url else None
+        client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=_base_url(selected_provider),
+            timeout=request_timeout,
+            max_retries=0,
+            http_client=http_client,
+        )
         _gapgpt_client_cache[cache_key] = client
 
     try:
@@ -248,10 +278,11 @@ async def run_llm(
     backoff = float(os.getenv('LLM_BACKOFF_SECONDS', '0.5'))
     max_backoff = float(os.getenv('LLM_MAX_BACKOFF_SECONDS', '8'))
     url = f'{_base_url(selected_provider)}/chat/completions'
+    proxy_url = _proxy_url(selected_provider)
 
     last_error: Exception | None = None
     started = time.perf_counter()
-    client = httpx.AsyncClient(timeout=request_timeout)
+    client = httpx.AsyncClient(timeout=request_timeout, proxy=proxy_url)
     try:
         for attempt in range(max(1, attempts)):
             try:
@@ -266,6 +297,7 @@ async def run_llm(
                         status='ok',
                         duration_ms=duration * 1000,
                         response_content=result['content'],
+                        proxy_configured=bool(proxy_url),
                     )
                     LLM_CALLS.labels(selected_provider, selected_model, 'ok').inc()
                     LLM_LATENCY.labels(selected_provider, selected_model).observe(duration)
@@ -291,6 +323,7 @@ async def run_llm(
                         status='ok',
                         duration_ms=duration * 1000,
                         response_content=content,
+                        proxy_configured=bool(proxy_url),
                     ),
                 }
             except httpx.HTTPStatusError as exc:
