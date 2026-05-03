@@ -67,6 +67,87 @@ def _correlation_uuid(request: Request) -> UUID | None:
         return None
 
 
+def _event_agent(event: IncidentEvent) -> str:
+    if event.event_type.startswith('history.'):
+        return 'history-agent'
+    if event.event_type.startswith('supervisor.'):
+        return 'supervisor-agent'
+    if event.event_type.startswith('report.'):
+        return 'report-agent'
+    return event.actor or 'unknown'
+
+
+def _agent_action(event: IncidentEvent) -> str:
+    payload = event.payload or {}
+    if event.event_type in {'history.incident_opened', 'history.incident_reopened'}:
+        return f"opened incident: {payload.get('summary') or payload.get('fingerprint') or 'no summary'}"
+    if event.event_type == 'history.alert_attached':
+        return f"attached alert {payload.get('event_key') or payload.get('alert_id') or ''}".strip()
+    if event.event_type == 'history.incident_resolved':
+        return payload.get('reason') or 'marked incident resolved from Alertmanager'
+    if event.event_type == 'supervisor.status_changed':
+        return f"changed status {payload.get('from')} -> {payload.get('to')}: {payload.get('reason') or 'no reason'}"
+    if event.event_type in {'supervisor.action_recorded', 'supervisor.supervisor_action'}:
+        decision = payload.get('decision') or (event.event_metadata or {}).get('reasoning_output', {}).get('next_state')
+        root_cause = payload.get('root_cause') or (event.event_metadata or {}).get('reasoning_output', {}).get('root_cause')
+        return f"analyzed incident; decision={decision or 'unknown'}; root_cause={root_cause or 'not provided'}"
+    if event.event_type == 'report.report_generated':
+        return f"generated final report with {payload.get('provider') or 'unknown'} / {payload.get('model') or 'unknown'}"
+    if event.event_type == 'report.delivery_recorded':
+        delivery = payload.get('delivery') or {}
+        channel = payload.get('channel') or 'unknown'
+        if delivery.get('sent'):
+            target = f" ({delivery.get('channel')})" if delivery.get('channel') else ''
+            return f'sent report to {channel}{target}'
+        if delivery.get('skipped'):
+            return f"skipped {channel} delivery: {delivery.get('skipped')}"
+        return f"{channel} delivery failed: {delivery.get('error') or 'not sent'}"
+    return event.event_type
+
+
+def _build_workflow_summary(incident_id: str, events: list[IncidentEvent]) -> dict:
+    actions = [
+        {
+            'sequence': event.sequence_number,
+            'at': event.created_at,
+            'agent': _event_agent(event),
+            'event_type': event.event_type,
+            'action': _agent_action(event),
+        }
+        for event in events
+    ]
+    report_events = [event for event in events if event.event_type == 'report.report_generated']
+    delivery_events = [event for event in events if event.event_type == 'report.delivery_recorded']
+    latest_report = report_events[-1].payload if report_events else None
+    latest_delivery = delivery_events[-1].payload if delivery_events else None
+    lines = [f'# SRE-AI Workflow Report', '', f'Incident: `{incident_id}`', '', '## What Each Agent Did']
+    for action in actions:
+        lines.append(f"- {action['agent']} ({action['event_type']}): {action['action']}")
+    lines.extend(['', '## Final Report'])
+    lines.append(latest_report.get('report') if latest_report else 'No report has been generated yet.')
+    lines.extend(['', '## Delivery'])
+    if latest_delivery:
+        delivery = latest_delivery.get('delivery') or {}
+        lines.append(f"- Channel: {latest_delivery.get('channel') or 'unknown'}")
+        lines.append(f"- Sent: {bool(delivery.get('sent'))}")
+        if delivery.get('channel'):
+            lines.append(f"- Target: {delivery.get('channel')}")
+        if delivery.get('skipped'):
+            lines.append(f"- Skipped: {delivery.get('skipped')}")
+        if delivery.get('error'):
+            lines.append(f"- Error: {delivery.get('error')}")
+    else:
+        lines.append('No channel delivery record exists for this incident yet.')
+    return {
+        'incident_id': incident_id,
+        'actions': actions,
+        'final_report': latest_report.get('report') if latest_report else None,
+        'deliveries': [event.payload for event in delivery_events],
+        'latest_delivery': latest_delivery,
+        'markdown': '\n'.join(lines),
+    }
+
+
 @router.get('/health')
 async def health(session: AsyncSession = Depends(get_db)) -> dict:
     database = 'connected'
@@ -206,6 +287,22 @@ async def generate_report(
                 correlation_id=_correlation_uuid(request),
                 idempotency_key=f'mattermost:{effective_idempotency_key}',
             )
+    async with session.begin():
+        await append_event(
+            session,
+            stream_id=event.stream_id,
+            event_type='report.delivery_recorded',
+            actor='report-agent',
+            correlation_id=_correlation_uuid(request),
+            idempotency_key=f'delivery:{effective_idempotency_key}',
+            causation_id=event.event_id,
+            payload={
+                'report_event_id': str(event.event_id),
+                'channel': 'mattermost',
+                'delivery': mattermost_delivery,
+            },
+            metadata=_metadata(request),
+        )
     AGENT_ACTIONS.labels('report-agent', 'report_generated').inc()
     return {
         'incident_id': incident_id,
@@ -232,3 +329,17 @@ async def get_latest_report(incident_id: str, session: AsyncSession = Depends(ge
     if event is None:
         raise HTTPException(status_code=404, detail='report not found')
     return {'incident_id': incident_id, 'report_event': event.payload, 'created_at': event.created_at, 'event_id': event.event_id}
+
+
+@router.get('/report/{incident_id}/workflow-summary')
+async def get_workflow_summary(incident_id: str, session: AsyncSession = Depends(get_db)) -> dict:
+    events = (
+        await session.execute(
+            select(IncidentEvent)
+            .where(IncidentEvent.stream_id == incident_id)
+            .order_by(IncidentEvent.sequence_number.asc())
+        )
+    ).scalars().all()
+    if not events:
+        raise HTTPException(status_code=404, detail='incident workflow not found')
+    return _build_workflow_summary(incident_id, events)

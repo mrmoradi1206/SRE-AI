@@ -323,6 +323,8 @@ Every firing Alertmanager alert is ingested by `history-agent`. The ingestion pa
 
 Keep `send_resolved: true`. When Alertmanager sends a resolved notification, `history-agent` attaches that final alert to the matching incident and marks the incident `resolved` without running a new LLM workflow.
 
+Each incident detail page includes a simple workflow report. It shows what History, Supervisor, and Report agents did, the final generated report text, and the channel delivery record such as whether Mattermost delivery was sent, skipped, or failed. The same data is available from `GET /api/report/{incident_id}/workflow-summary`.
+
 Connect Mattermost report delivery:
 
 1. Open `http://<server-ip>:8080/integrations`.

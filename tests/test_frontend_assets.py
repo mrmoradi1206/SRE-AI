@@ -14,6 +14,8 @@ def test_ui_contains_dashboard_and_search_assets():
     assert '/api/alertmanager/webhook' in app
     assert 'send_resolved: true' in app
     assert 'Mattermost delivery' in app
+    assert 'Agent activity and channel delivery' in app
+    assert '/workflow-summary' in app
     assert '/report/integrations/mattermost' in app
     assert 'Why there is no history model' in app
     assert 'Write the system prompt this agent sends to its model' in app

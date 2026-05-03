@@ -360,6 +360,7 @@ function IncidentDetailPage() {
   const navigate = useNavigate();
   const [incident, setIncident] = useState(null);
   const [report, setReport] = useState(null);
+  const [workflowSummary, setWorkflowSummary] = useState(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -373,6 +374,12 @@ function IncidentDetailPage() {
         setReport(latestReport);
       } catch {
         setReport(null);
+      }
+      try {
+        const summary = await apiFetch(`/report/${incidentId}/workflow-summary`);
+        setWorkflowSummary(summary);
+      } catch {
+        setWorkflowSummary(null);
       }
     } catch (err) {
       setError(err.message);
@@ -505,6 +512,39 @@ function IncidentDetailPage() {
           <span>{report ? 'stored' : 'not generated yet'}</span>
         </div>
         {report ? <pre>{report.report_event.report}</pre> : <p>No report event exists for this incident yet.</p>}
+      </div>
+
+      <div className="panel span-2">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Simple report</p>
+            <h3>Agent activity and channel delivery</h3>
+          </div>
+          <span>{workflowSummary?.actions?.length || 0} actions</span>
+        </div>
+        {workflowSummary ? (
+          <div className="stack-list">
+            <div className="timeline-grid">
+              {workflowSummary.actions.map((action) => (
+                <article key={`${action.sequence}-${action.event_type}`} className="timeline-item">
+                  <div className="timeline-meta">
+                    <strong>{action.agent}</strong>
+                    <span>{action.event_type}</span>
+                    <span>{formatDate(action.at)}</span>
+                  </div>
+                  <p>{action.action}</p>
+                </article>
+              ))}
+            </div>
+            <JsonBlock title="Delivery records" data={workflowSummary.deliveries || []} />
+            <details className="json-viewer" open>
+              <summary>Copyable markdown summary</summary>
+              <pre>{workflowSummary.markdown}</pre>
+            </details>
+          </div>
+        ) : (
+          <p>No agent activity summary is available yet.</p>
+        )}
       </div>
     </section>
   );
