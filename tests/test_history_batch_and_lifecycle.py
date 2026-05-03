@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / 'services' / 'history-agent'))
 from aiops_shared.models import IncidentStatus
 from aiops_shared.schemas import AlertBatchIn, AlertIn
 from aiops_shared.utils import utcnow
-from core.storage import ingest_alert_batch, recent_alerts_summary, should_reopen_incident
+from core.storage import _payload_received_at, ingest_alert_batch, is_resolved_alert, recent_alerts_summary, should_reopen_incident
 
 
 class FakeSession:
@@ -85,3 +85,16 @@ def test_should_reopen_incident_only_for_fresh_post_resolution_alerts(resolved_o
     )
     observed_at = now + timedelta(minutes=observed_offset_minutes)
     assert should_reopen_incident(incident, observed_at=observed_at, stale_after_hours=24) is expected
+
+
+def test_resolved_alert_uses_ends_at_timestamp():
+    alert = AlertIn(
+        payload={
+            'status': 'resolved',
+            'startsAt': '2026-05-03T08:00:00Z',
+            'endsAt': '2026-05-03T08:30:00Z',
+        }
+    )
+
+    assert is_resolved_alert(alert)
+    assert _payload_received_at(alert).isoformat() == '2026-05-03T08:30:00+00:00'

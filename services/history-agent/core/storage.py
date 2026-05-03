@@ -19,8 +19,17 @@ from .config import DEFAULT_ALERT_CONTEXT_HOURS, DEFAULT_SLA_HOURS, REOPEN_STALE
 ACTIVE_INCIDENTS = [IncidentStatus.OPEN, IncidentStatus.INVESTIGATING, IncidentStatus.MITIGATING]
 
 
+def is_resolved_alert(payload: AlertIn) -> bool:
+    status = payload.payload.get('status') or payload.metadata.get('status')
+    return isinstance(status, str) and status.strip().lower() == 'resolved'
+
+
 def _payload_received_at(payload: AlertIn) -> datetime:
-    candidate = (
+    if is_resolved_alert(payload):
+        candidate = payload.payload.get('endsAt') or payload.payload.get('ends_at') or payload.payload.get('resolved_at')
+    else:
+        candidate = None
+    candidate = candidate or (
         payload.payload.get('received_at')
         or payload.payload.get('startsAt')
         or payload.payload.get('starts_at')
@@ -61,6 +70,7 @@ async def ingest_alert(
     summary = payload.summary or payload.payload.get('summary') or payload.payload.get('message')
     source = payload.source or payload.payload.get('source')
     now = _payload_received_at(payload)
+    resolved_alert = is_resolved_alert(payload)
 
     incident = (
         await session.execute(
@@ -72,7 +82,11 @@ async def ingest_alert(
     ).scalar_one_or_none()
 
     opened_event = None
-    is_reopen = incident is not None and should_reopen_incident(incident, observed_at=now, stale_after_hours=REOPEN_STALE_AFTER_HOURS)
+    is_reopen = (
+        not resolved_alert
+        and incident is not None
+        and should_reopen_incident(incident, observed_at=now, stale_after_hours=REOPEN_STALE_AFTER_HOURS)
+    )
     if incident is None or is_reopen:
         incident = Incident(
             fingerprint=fingerprint,
@@ -156,6 +170,27 @@ async def ingest_alert(
         metadata=request_metadata,
     )
     await apply_event_to_projection(session, incident, attached_event)
+
+    if resolved_alert:
+        if incident.status not in {IncidentStatus.RESOLVED, IncidentStatus.CLOSED}:
+            resolved_event = await append_event(
+                session,
+                stream_id=incident.id,
+                event_type='history.incident_resolved',
+                actor='alertmanager',
+                correlation_id=correlation_id,
+                causation_id=attached_event.event_id,
+                idempotency_key=f'resolved:{incident.id}:{attached_event.sequence_number}',
+                payload={
+                    'from': incident.status.value,
+                    'to': IncidentStatus.RESOLVED.value,
+                    'reason': 'Alertmanager sent a resolved notification for this alert group.',
+                },
+                metadata=request_metadata | {'actor': 'alertmanager', 'source_status': 'resolved'},
+            )
+            await apply_event_to_projection(session, incident, resolved_event)
+        AGENT_ACTIONS.labels('history-agent', 'alert_resolved').inc()
+        return alert
 
     try:
         await enqueue_job(

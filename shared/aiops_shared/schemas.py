@@ -71,7 +71,9 @@ class AlertIn(BaseModel):
 class AlertBatchIn(BaseModel):
     alerts: list[AlertIn] = Field(min_length=1)
 
-    model_config = ConfigDict(extra='forbid')
+    # Alertmanager webhooks include receiver/status/groupLabels alongside alerts.
+    # Keep those envelope fields accepted while ingesting each alert item.
+    model_config = ConfigDict(extra='allow')
 
     @field_validator('alerts')
     @classmethod

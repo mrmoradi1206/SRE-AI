@@ -90,6 +90,13 @@ def apply_event_to_state(state: IncidentProjectionState, event: IncidentEvent) -
         elif state.status == IncidentStatus.CLOSED.value:
             state.closed_at = event.created_at
             state.closed_by = actor
+    elif event.event_type == 'history.incident_resolved':
+        actor = metadata.get('actor') or event.actor
+        state.status = IncidentStatus.RESOLVED.value
+        state.resolved_at = event.created_at
+        state.resolved_by = actor
+        state.mttr_seconds = calculate_mttr_seconds(state.resolved_at, state.first_seen_at)
+        state.sla_violated = bool(state.sla_deadline and state.resolved_at and state.resolved_at > state.sla_deadline)
     elif event.event_type in {'supervisor.supervisor_action', 'supervisor.action_recorded'}:
         supervisor_output = metadata.get('supervisor_output') or metadata.get('reasoning_output') or {}
         state.escalated_to = supervisor_output.get('next_state') or payload.get('decision') or state.escalated_to

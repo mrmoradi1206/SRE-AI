@@ -316,10 +316,12 @@ receivers:
   - name: sre-ai
     webhook_configs:
       - url: http://<server-ip>:8080/api/alertmanager/webhook
-        send_resolved: false
+        send_resolved: true
 ```
 
 Every firing Alertmanager alert is ingested by `history-agent`. The ingestion path queues `supervisor-agent`, and the supervisor queue worker generates a report after analysis, so the full History -> Supervisor -> Report workflow runs automatically.
+
+Keep `send_resolved: true`. When Alertmanager sends a resolved notification, `history-agent` attaches that final alert to the matching incident and marks the incident `resolved` without running a new LLM workflow.
 
 Connect Mattermost report delivery:
 

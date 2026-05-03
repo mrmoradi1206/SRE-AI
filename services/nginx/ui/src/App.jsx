@@ -773,7 +773,7 @@ function IntegrationPage() {
   - name: sre-ai
     webhook_configs:
       - url: '${webhookUrl}'
-        send_resolved: false${secret ? `\n        http_config:\n          authorization:\n            type: Bearer\n            credentials: '${secret}'` : ''}`;
+        send_resolved: true${secret ? `\n        http_config:\n          authorization:\n            type: Bearer\n            credentials: '${secret}'` : ''}`;
   const curlCommand = `curl -X POST '${webhookUrl}' \\
   -H 'Content-Type: application/json'${secret ? ` \\\n  -H 'Authorization: Bearer ${secret}'` : ''} \\
   -d '{
@@ -848,8 +848,8 @@ function IntegrationPage() {
           <p className="eyebrow">Alertmanager integration</p>
           <h3>Connect by IP and port</h3>
           <p>
-            Point Alertmanager at this webhook. Every firing alert is ingested by History, then Supervisor analysis and
-            Report generation run automatically through the queue worker.
+            Point Alertmanager at this webhook. Firing alerts are ingested by History, then Supervisor analysis and
+            Report generation run automatically. Resolved notifications mark the matching incident resolved.
           </p>
         </div>
         <WorkflowRail trace={[
@@ -907,7 +907,7 @@ function IntegrationPage() {
             <h3>Receiver snippet</h3>
           </div>
         </div>
-        <p>Add this receiver to Alertmanager and route firing alerts to `sre-ai`.</p>
+        <p>Add this receiver to Alertmanager and route alerts to `sre-ai`. Keep `send_resolved: true` so SRE-AI can close incidents when Alertmanager resolves them.</p>
         <pre>{composeReceiver}</pre>
       </div>
 
