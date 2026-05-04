@@ -105,22 +105,73 @@ def _agent_action(event: IncidentEvent) -> str:
     return event.event_type
 
 
+
+def _compact_payload(event: IncidentEvent) -> dict:
+    payload = event.payload or {}
+    metadata = event.event_metadata or {}
+    return {
+        'payload': payload,
+        'metadata': metadata,
+        'llm_trace': payload.get('llm_trace') or metadata.get('reasoning_output', {}).get('llm_trace'),
+        'react_trace': payload.get('react_trace') or metadata.get('reasoning_output', {}).get('react_trace') or [],
+        'recommended_actions': payload.get('recommended_actions') or metadata.get('reasoning_output', {}).get('recommended_actions') or [],
+        'root_cause': payload.get('root_cause') or metadata.get('reasoning_output', {}).get('root_cause'),
+        'decision': payload.get('decision') or metadata.get('reasoning_output', {}).get('next_state'),
+    }
+
+
+def _agent_children_from_react(event: IncidentEvent) -> list[dict]:
+    details = _compact_payload(event)
+    children: list[dict] = []
+    for index, step in enumerate(details.get('react_trace') or [], start=1):
+        action = step.get('action') or {}
+        observation = step.get('observation') or {}
+        agent_response = observation.get('agent_response') if isinstance(observation, dict) else None
+        source = observation.get('source') if isinstance(observation, dict) else None
+        if agent_response:
+            source = agent_response.get('agent') or source
+        if source not in {'observability-agent', 'repo-agent'}:
+            continue
+        children.append({
+            'sequence': f'{event.sequence_number}.{index}',
+            'at': event.created_at,
+            'agent': source,
+            'event_type': f"tool.{action.get('name') or 'analyze'}",
+            'action': agent_response.get('analysis') if isinstance(agent_response, dict) else observation.get('summary', 'agent returned evidence'),
+            'status': agent_response.get('status') if isinstance(agent_response, dict) else observation.get('status'),
+            'details': agent_response or observation,
+        })
+    return children
+
 def _build_workflow_summary(incident_id: str, events: list[IncidentEvent]) -> dict:
-    actions = [
-        {
+    actions = []
+    for event in events:
+        details = _compact_payload(event)
+        actions.append({
             'sequence': event.sequence_number,
             'at': event.created_at,
             'agent': _event_agent(event),
             'event_type': event.event_type,
             'action': _agent_action(event),
-        }
-        for event in events
-    ]
+            'status': 'ok',
+            'details': details,
+        })
+        actions.extend(_agent_children_from_react(event))
     report_events = [event for event in events if event.event_type == 'report.report_generated']
     delivery_events = [event for event in events if event.event_type == 'report.delivery_recorded']
     latest_report = report_events[-1].payload if report_events else None
     latest_delivery = delivery_events[-1].payload if delivery_events else None
-    lines = [f'# SRE-AI Workflow Report', '', f'Incident: `{incident_id}`', '', '## What Each Agent Did']
+    by_agent: dict[str, list[dict]] = {}
+    for action in actions:
+        by_agent.setdefault(action['agent'], []).append(action)
+    commander_flow = {
+        'brain': 'supervisor-agent',
+        'contract': 'History records facts; observability-agent and repo-agent analyze evidence for Supervisor; report-agent writes the final report after Supervisor command.',
+        'observability_reports_to_supervisor': any(action['agent'] == 'observability-agent' for action in actions),
+        'repo_reports_to_supervisor': any(action['agent'] == 'repo-agent' for action in actions),
+        'report_triggered_after_supervisor': bool(report_events) and any(event.event_type.startswith('supervisor.') for event in events),
+    }
+    lines = [f'# Cortex Workflow Report', '', f'Incident: `{incident_id}`', '', '## What Each Agent Did']
     for action in actions:
         lines.append(f"- {action['agent']} ({action['event_type']}): {action['action']}")
     lines.extend(['', '## Final Report'])
@@ -141,6 +192,8 @@ def _build_workflow_summary(incident_id: str, events: list[IncidentEvent]) -> di
     return {
         'incident_id': incident_id,
         'actions': actions,
+        'by_agent': by_agent,
+        'commander_flow': commander_flow,
         'final_report': latest_report.get('report') if latest_report else None,
         'deliveries': [event.payload for event in delivery_events],
         'latest_delivery': latest_delivery,
@@ -198,7 +251,7 @@ async def test_mattermost_integration() -> dict:
         'alerts': [],
     }
     sample_report = (
-        'This is a test message from the SRE-AI report-agent. '
+        'This is a test message from the Cortex report-agent. '
         'If you can read this in Mattermost, report delivery is configured.'
     )
     try:

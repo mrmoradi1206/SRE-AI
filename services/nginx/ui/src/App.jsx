@@ -29,17 +29,17 @@ const SAMPLE_ALERT = {
   },
 };
 const NAV_ITEMS = [
-  { to: '/', label: 'Dashboard', hint: 'Command overview' },
+  { to: '/', label: 'Dashboard', hint: 'Cortex overview' },
   { to: '/incidents', label: 'Incidents', hint: 'Triage queue' },
   { to: '/workflow', label: 'Test Workflow', hint: 'End-to-end drill' },
   { to: '/integrations', label: 'Integrations', hint: 'Alertmanager webhook' },
   { to: '/agents', label: 'Agents', hint: 'Compose health' },
-  { to: '/settings', label: 'LLM Settings', hint: 'Model routing' },
+  { to: '/settings', label: 'Cortex Models', hint: 'Model routing' },
 ];
 const OPS_SIGNALS = [
   ['99.95%', 'target SLO'],
   ['< 4h', 'default SLA'],
-  ['6+', 'service nodes'],
+  ['Cortex', 'commander'],
 ];
 
 async function apiFetch(path, options = {}) {
@@ -376,12 +376,12 @@ function Shell({ children }) {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand-card">
-          <div className="brand-mark">SA</div>
+          <div className="brand-mark">CX</div>
           <div>
-            <p className="eyebrow">SRE-AI</p>
-            <h1>Control Room</h1>
+            <p className="eyebrow">Cortex</p>
+            <h1>Command Center</h1>
           </div>
-          <p className="sidebar-copy">A production-minded command surface for alert history, AI-assisted triage, and operator reporting.</p>
+          <p className="sidebar-copy">A supervisor-led incident cortex for alerts, agent evidence, decisions, and operator reporting.</p>
         </div>
         <nav aria-label="Primary navigation">
           {NAV_ITEMS.map((item) => (
@@ -395,7 +395,7 @@ function Shell({ children }) {
           <span className="live-dot" />
           <div>
             <strong>Live operations</strong>
-            <p>History, supervisor, and reports routed through nginx</p>
+            <p>Supervisor commands Cortex agents through nginx</p>
           </div>
         </div>
       </aside>
@@ -403,10 +403,10 @@ function Shell({ children }) {
         <header className="topbar">
           <div>
             <p className="eyebrow">Operational overview</p>
-            <h2>AIOps incident dashboard</h2>
+            <h2>Cortex incident command</h2>
           </div>
           <div className="topbar-actions">
-            <span className="topbar-note">Searchable timelines, safe pagination, provider-aware AI actions</span>
+            <span className="topbar-note">Supervisor-first agent logs, evidence, and actions</span>
             <button type="button" className="ghost-button" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
               {theme === 'light' ? 'Dark mode' : 'Light mode'}
             </button>
@@ -452,10 +452,10 @@ function DashboardPage() {
     <section className="page-grid">
       <div className="hero-card span-2">
         <div className="hero-copy">
-          <p className="eyebrow">System pulse</p>
-          <h3>Recent signal and incident posture</h3>
+          <p className="eyebrow">Cortex pulse</p>
+          <h3>Signals, commander state, and incident posture</h3>
           <p>
-            The dashboard surfaces append-only alert history, current lifecycle state, and recent alert activity without
+            Cortex surfaces append-only alert history, Supervisor decisions, and recent signal activity without
             unbounded queries.
           </p>
         </div>
@@ -632,6 +632,91 @@ function IncidentsPage() {
   );
 }
 
+
+function CortexCommandPanel({ workflowSummary, trace, report }) {
+  const agents = ['supervisor-agent', 'observability-agent', 'repo-agent', 'history-agent', 'report-agent'];
+  const byAgent = workflowSummary?.by_agent || {};
+  const traceSteps = trace?.steps || [];
+  const supervisorFinal = [...traceSteps].reverse().find((step) => step.final)?.final;
+  const commander = workflowSummary?.commander_flow || {
+    brain: 'supervisor-agent',
+    contract: 'Supervisor is the commander. Tool agents return evidence to Supervisor before final operator output.',
+  };
+
+  const actionPreview = (action) => {
+    const text = typeof action.action === 'string' ? action.action : JSON.stringify(action.action || '');
+    return text.length > 320 ? `${text.slice(0, 320)}...` : text;
+  };
+
+  return (
+    <div className="panel span-2 cortex-command-panel">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">Cortex command log</p>
+          <h3>Supervisor brain and agent responses</h3>
+        </div>
+        <span className="count-pill">{workflowSummary?.actions?.length || 0} actions</span>
+      </div>
+      <p className="commander-copy">{commander.contract}</p>
+      <div className="commander-strip">
+        <div>
+          <span>Brain</span>
+          <strong>{commander.brain || 'supervisor-agent'}</strong>
+        </div>
+        <div>
+          <span>Observability reports</span>
+          <strong>{commander.observability_reports_to_supervisor ? 'seen' : 'waiting'}</strong>
+        </div>
+        <div>
+          <span>Repo reports</span>
+          <strong>{commander.repo_reports_to_supervisor ? 'seen' : 'waiting'}</strong>
+        </div>
+        <div>
+          <span>Final report</span>
+          <strong>{report || workflowSummary?.final_report ? 'generated' : 'pending'}</strong>
+        </div>
+      </div>
+
+      {supervisorFinal ? <JsonBlock title="Supervisor final decision" data={supervisorFinal} /> : null}
+
+      <div className="agent-ledger-grid">
+        {agents.map((agent) => {
+          const actions = byAgent[agent] || [];
+          return (
+            <article key={agent} className={`agent-ledger-card ${agent === 'supervisor-agent' ? 'commander-card' : ''}`}>
+              <div className="panel-header compact">
+                <div>
+                  <p className="eyebrow">{agent === 'supervisor-agent' ? 'Commander' : 'Agent'}</p>
+                  <h3>{agent}</h3>
+                </div>
+                <span className="count-pill">{actions.length}</span>
+              </div>
+              {!actions.length ? (
+                <p className="muted-text">No recorded action for this incident yet.</p>
+              ) : (
+                <div className="agent-action-list">
+                  {actions.map((action) => (
+                    <details key={`${agent}-${action.sequence}-${action.event_type}`} className="agent-action-item">
+                      <summary>
+                        <span>{action.event_type}</span>
+                        <small>{formatDate(action.at)}</small>
+                      </summary>
+                      <p>{actionPreview(action)}</p>
+                      {action.details?.recommended_actions?.length ? <JsonBlock title="Recommended actions" data={action.details.recommended_actions} /> : null}
+                      {action.details?.llm_trace ? <JsonBlock title="LLM trace" data={action.details.llm_trace} /> : null}
+                      {action.details ? <JsonBlock title="Raw action detail" data={safeJson(action.details)} /> : null}
+                    </details>
+                  ))}
+                </div>
+              )}
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function IncidentDetailPage() {
   const { incidentId } = useParams();
   const navigate = useNavigate();
@@ -769,7 +854,7 @@ function IncidentDetailPage() {
       <div className="panel span-2">
         <div className="panel-header">
           <div>
-            <p className="eyebrow">Incident detail</p>
+            <p className="eyebrow">Cortex incident</p>
             <h3>{incident.summary || incident.fingerprint}</h3>
           </div>
           <div className="incident-meta">
@@ -786,11 +871,11 @@ function IncidentDetailPage() {
           <div><strong>MTTR</strong><p>{incident.mttr_seconds ?? 'n/a'}s</p></div>
         </div>
         <div className="action-row wrap">
-          <button disabled={busy} onClick={() => act('/supervisor/analyze', { incident_id: incident.id })}>Ask Supervisor</button>
+          <button disabled={busy} onClick={() => act('/supervisor/analyze', { incident_id: incident.id })}>Ask Cortex Supervisor</button>
           <button disabled={busy} onClick={() => act('/supervisor/investigate', { incident_id: incident.id, reason: 'Investigate from UI' })}>Investigate</button>
           <button disabled={busy} onClick={() => act('/supervisor/mitigate', { incident_id: incident.id, reason: 'Mitigate from UI' })}>Mitigate</button>
           <button disabled={busy} onClick={() => act('/supervisor/resolve', { incident_id: incident.id, reason: 'Resolve from UI' })}>Resolve</button>
-          <button disabled={busy} onClick={() => act(`/report/${incident.id}`, {})}>Generate Report</button>
+          <button disabled={busy} onClick={() => act(`/report/${incident.id}`, {})}>Generate Cortex Report</button>
           <button disabled={busy} onClick={() => setApproveOpen(true)}>Approve & Learn</button>
           <button className="danger-button" disabled={busy} onClick={deleteCurrentIncident}>Delete Incident</button>
           <button className="ghost-button" onClick={() => navigate('/incidents')}>Back</button>
@@ -798,6 +883,8 @@ function IncidentDetailPage() {
         {message ? <pre>{message}</pre> : null}
         {error ? <p className="error-text">{error}</p> : null}
       </div>
+
+      <CortexCommandPanel workflowSummary={workflowSummary} trace={reactTrace} report={report} />
 
       <ReActTracePanel trace={reactTrace} loading={traceLoading} />
 
@@ -890,8 +977,8 @@ function IncidentDetailPage() {
       <div className="panel span-2">
         <div className="panel-header">
           <div>
-            <p className="eyebrow">Simple report</p>
-            <h3>Agent activity and channel delivery</h3>
+            <p className="eyebrow">Cortex report</p>
+            <h3>All agent actions and channel delivery</h3>
           </div>
           <span>{workflowSummary?.actions?.length || 0} actions</span>
         </div>
@@ -1096,7 +1183,7 @@ function AgentsPage() {
 
 function MattermostIntegration() {
   const [config, setConfig] = useState(null);
-  const [draft, setDraft] = useState({ enabled: false, webhook_url: '', channel: '', username: 'SRE-AI Report Agent', icon_url: '' });
+  const [draft, setDraft] = useState({ enabled: false, webhook_url: '', channel: '', username: 'Cortex Report Agent', icon_url: '' });
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -1110,7 +1197,7 @@ function MattermostIntegration() {
         ...current,
         enabled: Boolean(next.enabled),
         channel: next.channel || '',
-        username: next.username || 'SRE-AI Report Agent',
+        username: next.username || 'Cortex Report Agent',
         icon_url: next.icon_url || '',
         webhook_url: '',
       }));
@@ -1564,7 +1651,7 @@ function AlertmanagerConnection() {
           </div>
           <button type="button" className="ghost-button" onClick={() => copyText(composeReceiver, 'Receiver YAML')}>Copy YAML</button>
         </div>
-        <p>Route firing and resolved notifications to `sre-ai`. Keep `send_resolved: true` so SRE-AI closes incidents when Alertmanager resolves them.</p>
+        <p>Route firing and resolved notifications to `sre-ai`. Keep `send_resolved: true` so Cortex closes incidents when Alertmanager resolves them.</p>
         <pre>{composeReceiver}</pre>
       </div>
 
@@ -1723,9 +1810,9 @@ function SettingsPage() {
     <section className="page-grid">
       <div className="hero-card span-2">
         <div className="hero-copy">
-          <p className="eyebrow">LLM Settings</p>
+          <p className="eyebrow">Cortex Models</p>
           <h3>Live model routing per agent</h3>
-          <p>Switch providers and models without rebuilding containers. The backend reloads this file-backed config on each LLM call.</p>
+          <p>Switch providers, models, and prompts without rebuilding containers. Supervisor remains the Cortex commander while tool agents report evidence back to it.</p>
         </div>
         <div className="provider-strip">
           {draft.providers.map((provider) => <span key={provider}>{providerLabel(provider)}</span>)}

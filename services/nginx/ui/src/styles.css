@@ -1189,3 +1189,105 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 }
+
+.cortex-command-panel::before {
+  background: linear-gradient(90deg, #c5772a, var(--accent), var(--info));
+}
+
+.commander-copy,
+.muted-text {
+  color: var(--muted);
+}
+
+.commander-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.8rem;
+  margin: 1rem 0;
+}
+
+.commander-strip > div {
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, rgba(14, 107, 92, 0.1), rgba(197, 119, 42, 0.1));
+}
+
+.commander-strip span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.commander-strip strong {
+  display: block;
+  margin-top: 0.35rem;
+  text-transform: capitalize;
+}
+
+.agent-ledger-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.agent-ledger-card {
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.commander-card {
+  border-color: rgba(197, 119, 42, 0.38);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(197, 119, 42, 0.18), transparent 9rem),
+    rgba(255, 255, 255, 0.56);
+}
+
+.agent-action-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.agent-action-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(21, 32, 28, 0.045);
+  overflow: hidden;
+}
+
+.agent-action-item summary {
+  cursor: pointer;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.8rem 0.9rem;
+  font-weight: 900;
+}
+
+.agent-action-item summary small {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.agent-action-item p {
+  margin: 0;
+  padding: 0 0.9rem 0.8rem;
+  color: var(--muted);
+}
+
+.agent-action-item .json-viewer {
+  margin: 0.7rem 0.9rem 0.9rem;
+}
+
+:root[data-theme="dark"] .agent-ledger-card,
+:root[data-theme="dark"] .agent-action-item {
+  background: rgba(255, 255, 255, 0.055);
+}

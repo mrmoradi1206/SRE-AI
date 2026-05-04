@@ -271,6 +271,22 @@ class SupervisorAdvisor:
                     limit=5,
                 )
             observations: list[dict[str, Any]] = []
+            # Cortex contract: Supervisor is the commander and always asks specialist agents for evidence first.
+            for specialist_action in [
+                {'name': 'query_observability', 'input': None},
+                {'name': 'query_repo_changes', 'input': None},
+            ]:
+                observation = await self._run_action(incident_bundle, specialist_action)
+                observations.append(observation)
+                preflight_step = {
+                    'iteration': 0,
+                    'thought': f"Cortex Supervisor requested {specialist_action['name']} before final reasoning.",
+                    'action': specialist_action,
+                    'observation': observation,
+                }
+                react_trace.append(preflight_step)
+                await self.memory.append(incident_id, preflight_step)
+
             final_decision: dict[str, Any] | None = None
             for iteration in range(1, max(1, REACT_MAX_ITERATIONS) + 1):
                 prompt = json.dumps(

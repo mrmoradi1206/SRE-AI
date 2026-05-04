@@ -1,6 +1,6 @@
-# SRE-AI
+# Cortex
 
-SRE-AI is a Docker-first, multi-agent incident platform:
+Cortex is a Docker-first, supervisor-led multi-agent incident platform:
 
 - `history-agent`: receives and deduplicates incoming alerts, stores incidents/events, and provides history APIs
 - `report-agent`: generates incident reports from supervisor context
@@ -302,6 +302,7 @@ All frontend/API traffic is served through one listener, prefixed by `/api`:
 - The incident detail page polls this trace every 3 seconds while the incident status is `investigating`.
 - The incident detail page also includes widgets for PromQL results, Elasticsearch error logs/stack traces, and recent GitLab commits/MRs.
 - `observability-agent` and `repo-agent` have their own LLM routes and editable system prompts in `/settings`; supervisor calls their `/api/v1/analyze` endpoints as agent-to-agent tools.
+- Cortex enforces a supervisor-first contract: observability-agent and repo-agent return specialist analysis to supervisor-agent, and report-agent writes the final report after Supervisor analysis.
 - Human SREs can click **Approve & Learn** to edit the final root cause/resolution and save it to `incident_knowledge` for future retrieval.
 - The `/integrations` page lets operators set Prometheus URL, Elasticsearch URL/index, GitLab URL/token/project, and run connection tests without rebuilding containers. These values are saved under `config/observability_integrations.json` and `config/repo_integrations.json` on the mounted config volume.
 
@@ -374,7 +375,7 @@ Every firing Alertmanager alert is ingested by `history-agent`. The ingestion pa
 
 Keep `send_resolved: true`. When Alertmanager sends a resolved notification, `history-agent` attaches that final alert to the matching incident and marks the incident `resolved` without running a new LLM workflow.
 
-Each incident detail page includes a simple workflow report. It shows what History, Supervisor, and Report agents did, the final generated report text, and the channel delivery record such as whether Mattermost delivery was sent, skipped, or failed. The same data is available from `GET /api/report/{incident_id}/workflow-summary`.
+Each incident detail page includes a Cortex command log. It shows Supervisor as the brain/commander, includes History, Observability, Repo, and Report agent actions, exposes sanitized LLM traces and raw action details, and shows channel delivery records such as whether Mattermost delivery was sent, skipped, or failed. The same enriched data is available from `GET /api/report/{incident_id}/workflow-summary`.
 
 Incidents and timeline events can be deleted from the UI when cleaning test data. Use the Incidents page delete button to remove an incident together with its alerts, timeline events, and queued actions, or open an incident and use `Delete event` on a single timeline entry. The matching APIs are `DELETE /api/history/incidents/{incident_id}` and `DELETE /api/history/incidents/{incident_id}/events/{event_id}`.
 
