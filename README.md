@@ -167,6 +167,8 @@ Use this page to explain Cortex to operators, teammates, and stakeholders.
 - **Cortex parts** explains every major module in the app.
 - **How Supervisor thinks** explains the ReAct loop: Thought, Action, Observation, Decision.
 - **How SREs use it** explains the operator path: open incident, review logs, run integrations, generate report, approve and learn.
+- **SRE operator playbook** explains the real operations workflow in detail: prepare integrations and models, triage incidents, validate agent evidence, mitigate and communicate, resolve, and teach Cortex with approved lessons.
+- **Operator principles** reminds SREs to trust but verify LLM hypotheses, preserve real audit evidence, and approve only accurate lessons for long-term memory.
 
 ### Incidents page
 

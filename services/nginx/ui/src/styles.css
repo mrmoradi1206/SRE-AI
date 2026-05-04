@@ -687,6 +687,87 @@ button:disabled {
   color: var(--accent-strong);
 }
 
+.sre-playbook-panel::before {
+  background: linear-gradient(90deg, var(--gold), var(--accent), var(--info));
+}
+
+.playbook-intro {
+  max-width: 68rem;
+  color: var(--muted);
+  font-size: 1.02rem;
+  line-height: 1.7;
+}
+
+.sre-playbook-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.sre-playbook-card {
+  display: grid;
+  align-content: start;
+  gap: 0.9rem;
+  min-height: 330px;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(240, 184, 87, 0.12), transparent 8rem),
+    rgba(255, 255, 255, 0.56);
+}
+
+.playbook-card-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.8rem;
+  align-items: start;
+}
+
+.sre-playbook-card h4 {
+  margin: 0.7rem 0 0;
+  font-size: 1.2rem;
+  letter-spacing: -0.03em;
+}
+
+.sre-playbook-card ul {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.sre-playbook-card li::marker {
+  color: var(--accent);
+}
+
+.operator-principles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.operator-principles > div {
+  padding: 1rem;
+  border: 1px solid rgba(0, 143, 119, 0.18);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+
+.operator-principles strong {
+  color: var(--accent-strong);
+}
+
+.operator-principles p {
+  margin-bottom: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
 @keyframes slow-spin {
   to {
     transform: rotate(360deg);
@@ -1455,6 +1536,10 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 
+  .operator-principles {
+    grid-template-columns: 1fr;
+  }
+
   .flow-river::before {
     top: 2rem;
     bottom: 2rem;
@@ -1820,8 +1905,13 @@ textarea:focus {
 :root[data-theme="dark"] .part-card,
 :root[data-theme="dark"] .loop-stack div,
 :root[data-theme="dark"] .operator-path span,
-:root[data-theme="dark"] .operator-path a {
+:root[data-theme="dark"] .operator-path a,
+:root[data-theme="dark"] .sre-playbook-card {
   background:
     radial-gradient(circle at 100% 0%, rgba(117, 216, 188, 0.08), transparent 7rem),
     rgba(255, 255, 255, 0.055);
+}
+
+:root[data-theme="dark"] .operator-principles > div {
+  background: rgba(117, 216, 188, 0.08);
 }

@@ -84,6 +84,63 @@ const CORTEX_PARTS = [
   ['Integrations', 'Alertmanager, Mattermost, Prometheus, Elasticsearch, GitLab, LLM providers, and proxies.'],
   ['UI', 'Cortex Command Center for triage, agent logs, investigations, configuration, and cleanup.'],
 ];
+const SRE_OPERATOR_PLAYBOOK = [
+  {
+    stage: '1. Prepare the control plane',
+    goal: 'Make Cortex trustworthy before an incident starts.',
+    actions: [
+      'Open Integrations and connect Alertmanager, Mattermost, Prometheus, Elasticsearch, and GitLab.',
+      'Open Cortex Models and verify each LLM-backed agent has the right provider, model, prompt, API key, and proxy.',
+      'Open Agents and confirm every service is healthy before relying on automated investigation.',
+    ],
+    button: 'Integrations',
+    to: '/integrations',
+  },
+  {
+    stage: '2. Triage incoming incidents',
+    goal: 'Understand impact quickly and decide if Cortex should investigate.',
+    actions: [
+      'Open Incidents, filter by status or severity, and pick the newest/highest-risk incident.',
+      'Read the incident header, alert samples, SLA deadline, service labels, and timeline.',
+      'Click Ask Cortex Supervisor or Investigate so the commander gathers evidence from agents.',
+    ],
+    button: 'Incidents',
+    to: '/incidents',
+  },
+  {
+    stage: '3. Validate the agent evidence',
+    goal: 'Use Cortex as a co-pilot, not a black box.',
+    actions: [
+      'Review Cortex command log to confirm Observability and Repo reported back to Supervisor.',
+      'Expand ReAct Thought, Action, and Observation steps to understand why Supervisor made its decision.',
+      'Run Prometheus, Elasticsearch, or GitLab widgets manually when you need extra proof.',
+    ],
+    button: 'How traces look',
+    to: '/workflow',
+  },
+  {
+    stage: '4. Execute and communicate',
+    goal: 'Move the incident forward with clear operator actions.',
+    actions: [
+      'Use Mitigate when a workaround, rollback, scale-up, or traffic shift starts.',
+      'Generate Cortex Report when you need a clean update for Mattermost or stakeholders.',
+      'Keep the timeline clean: delete only test/noise events, never real audit evidence during production incidents.',
+    ],
+    button: 'Run drill',
+    to: '/workflow',
+  },
+  {
+    stage: '5. Resolve and teach Cortex',
+    goal: 'Close the loop so the next incident is faster.',
+    actions: [
+      'Click Resolve only after Alertmanager/service signals are healthy and the customer impact is gone.',
+      'Click Approve & Learn, edit the root cause and resolution, and save the final human-approved lesson.',
+      'Use the latest report and command log for post-incident review and follow-up tasks.',
+    ],
+    button: 'Review queue',
+    to: '/incidents',
+  },
+];
 
 async function apiFetch(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -779,6 +836,51 @@ function HowItWorksPage() {
           <span>Approve & Learn</span>
         </div>
         <p className="muted-text">The UI keeps raw payloads available, but the primary experience is the Cortex command log and investigation timeline.</p>
+      </div>
+
+      <div className="panel span-2 sre-playbook-panel">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">SRE operator playbook</p>
+            <h3>What you should do with Cortex during real operations</h3>
+          </div>
+          <span className="count-pill">Human-in-command</span>
+        </div>
+        <p className="playbook-intro">
+          Cortex does the repetitive evidence gathering, timeline writing, and report drafting. The SRE stays in
+          control: verify the evidence, choose the safe action, communicate clearly, and approve what the system should
+          remember.
+        </p>
+        <div className="sre-playbook-grid">
+          {SRE_OPERATOR_PLAYBOOK.map((item) => (
+            <article key={item.stage} className="sre-playbook-card">
+              <div className="playbook-card-header">
+                <div>
+                  <span className="count-pill">{item.stage}</span>
+                  <h4>{item.goal}</h4>
+                </div>
+                <Link className="ghost-button small-button" to={item.to}>{item.button}</Link>
+              </div>
+              <ul>
+                {item.actions.map((action) => <li key={action}>{action}</li>)}
+              </ul>
+            </article>
+          ))}
+        </div>
+        <div className="operator-principles">
+          <div>
+            <strong>Trust but verify</strong>
+            <p>Use LLM output as a fast hypothesis. Confirm with metrics, logs, repo changes, and service health.</p>
+          </div>
+          <div>
+            <strong>Keep audit history clean</strong>
+            <p>Delete test data when needed, but preserve real incident evidence for review and learning.</p>
+          </div>
+          <div>
+            <strong>Teach the system</strong>
+            <p>Approve only accurate root causes and resolutions so pgvector memory improves future investigations.</p>
+          </div>
+        </div>
       </div>
     </section>
   );
