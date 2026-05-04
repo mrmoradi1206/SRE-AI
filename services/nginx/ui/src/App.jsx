@@ -520,12 +520,22 @@ function Shell({ children }) {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand-card">
-          <div className="brand-mark">CX</div>
-          <div>
-            <p className="eyebrow">Cortex</p>
-            <h1>Command Center</h1>
+          <div className="brand-topline">
+            <div className="brand-mark">CX</div>
+            <span className="brand-status">Live command</span>
           </div>
-          <p className="sidebar-copy">A supervisor-led incident cortex for alerts, agent evidence, decisions, and operator reporting.</p>
+          <div className="brand-title">
+            <p className="eyebrow">Cortex</p>
+            <h1>Incident Command</h1>
+          </div>
+          <p className="sidebar-copy">
+            Supervisor-led incident intelligence for alerts, evidence, decisions, reports, and SRE learning.
+          </p>
+          <div className="brand-signals" aria-label="Cortex core capabilities">
+            <span>Brain</span>
+            <span>Agents</span>
+            <span>Reports</span>
+          </div>
         </div>
         <nav aria-label="Primary navigation">
           {NAV_ITEMS.map((item) => (
