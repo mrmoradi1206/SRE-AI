@@ -125,8 +125,124 @@ docker compose port nginx 80
   - `/incidents` — Incident queue with filtering
   - `/incidents/:incidentId` — Incident details and timeline
   - `/workflow` — End-to-end workflow simulator
+  - `/integrations` — Alertmanager, Mattermost, Prometheus, Elasticsearch, and GitLab setup
   - `/agents` — Service readiness/status
   - `/settings` — LLM routing and runtime API keys
+
+---
+
+## Cortex UI guide
+
+The UI is the operator command center. It is designed around one rule: `supervisor-agent` is the Cortex brain, and every specialist agent returns evidence or delivery status back into the incident record.
+
+### Global navigation and header
+
+- **Dashboard** opens the Cortex overview with current incident posture and recent signals.
+- **Incidents** opens the triage queue where you search, filter, open, or delete incidents.
+- **Test Workflow** opens a safe end-to-end simulator for a synthetic alert.
+- **Integrations** opens all external connection settings: Alertmanager, Mattermost, Prometheus, Elasticsearch, and GitLab.
+- **Agents** opens live health checks for Docker compose nodes and platform services.
+- **Cortex Models** opens LLM routing, prompts, provider networking, proxy, and runtime API key settings.
+- **Dark mode / Light mode** switches the browser theme only; it does not change backend behavior.
+
+### Dashboard page
+
+The dashboard is a read-only operations overview.
+
+- **Open incidents**, **Investigating**, **Mitigating**, and **Resolved in 24h** show current counters from `history-agent`.
+- **See all** opens the full Incidents queue.
+- **Recent incidents** cards open the selected incident detail page.
+- **Recent alerts** shows the latest alert samples from the last 24 hours.
+
+### Incidents page
+
+Use this page to triage and clean incident data.
+
+- **Search summary, fingerprint, grouping key** filters incidents by text.
+- **All statuses** filters by lifecycle state: open, investigating, mitigating, resolved, or closed.
+- Clicking an incident row opens the full investigation page.
+- **Delete** removes that incident, its alert samples, timeline events, and queued actions. Use this mainly for test cleanup.
+
+### Incident detail and investigation page
+
+This is the main SRE workbench for one incident.
+
+- **Ask Cortex Supervisor** runs supervisor analysis for the incident and records supervisor decisions.
+- **Investigate** moves the incident into investigating and asks Supervisor to gather more evidence.
+- **Mitigate** moves the incident into mitigation and records the operator reason.
+- **Resolve** marks the incident resolved from the UI and records the resolution action.
+- **Generate Cortex Report** asks `report-agent` to build the current incident report and send it to Mattermost if enabled.
+- **Approve & Learn** opens a modal to review/edit root cause and resolution, then saves the approved knowledge into pgvector long-term memory.
+- **Delete Incident** removes the current incident and related records.
+- **Back** returns to the Incidents queue.
+- **Cortex command log** shows the supervisor-first flow: Supervisor as commander, Observability and Repo evidence returned to Supervisor, History events, Report actions, and channel delivery records.
+- **Supervisor final decision** shows the final structured decision from the latest ReAct trace when available.
+- Agent action rows can be expanded to inspect recommended actions, sanitized LLM traces, and raw event details.
+- **Chain of Thought Trace** shows the Supervisor ReAct loop as Thought, Action, Observation, and Final decision cards. It polls while the incident is investigating.
+- **Similar Past Incidents** shows pgvector/RAG matches that were saved through Approve & Learn.
+- **Query Prometheus** runs the PromQL in the input field through `observability-agent`.
+- **Search recent errors** asks `observability-agent` to fetch recent Elasticsearch errors and stack traces for the detected service.
+- **Fetch GitLab changes** asks `repo-agent` for recent commits and merge requests, optionally using the project ID/path in the field.
+- **Raw alert samples** exposes the alert payloads that created or updated the incident.
+- **Correlation stub** shows placeholder relationship nodes for future topology/correlation work.
+- **Investigation Timeline** is a human-readable incident event stream with filters for all, supervisor, observability, repo, report, history, and system events.
+- **Delete event** removes only that timeline entry, not the whole incident.
+- **Raw metadata and payload** expands the copyable JSON for a timeline event.
+- **Latest report** shows the latest stored report body.
+- **All agent actions and channel delivery** shows the report summary, Mattermost delivery status, and copyable markdown summary.
+
+### Test Workflow page
+
+Use this page to verify the full Cortex loop without waiting for a real alert.
+
+- **Reset sample** restores the default synthetic checkout-latency alert JSON.
+- **Test Alert** posts the JSON to the workflow API, then runs History -> Supervisor -> Report.
+- **Step trace** shows each backend step returned by the workflow.
+- **LLM request/response trace (sanitized)** shows model calls without leaking API keys.
+- **Supervisor reasoning** shows the structured supervisor response.
+- **Final report** shows the generated report response.
+
+### Integrations page
+
+Use this page to connect external systems without rebuilding containers.
+
+- **Submit Endpoint Changes** saves the Alertmanager public IP/DNS/port in browser storage and rebuilds the displayed webhook URL, YAML, and curl examples.
+- **Endpoint Saved** means the displayed endpoint already matches the saved browser value.
+- **Copy saved URL** copies the saved Alertmanager webhook URL.
+- **Send Test Alert** posts a synthetic Alertmanager webhook to Cortex and should trigger History -> Supervisor -> Report.
+- **Open incidents** jumps to the incident queue after sending or configuring alerts.
+- **Copy YAML** copies the Alertmanager receiver snippet. Keep `send_resolved: true` so resolved notifications close Cortex incidents.
+- **Copy curl** copies a manual webhook test command.
+- **Save Mattermost** saves the Mattermost webhook, enabled state, channel override, bot username, and icon URL.
+- **Send Mattermost Test** sends a test message through the saved Mattermost integration.
+- **Reload** in Data integrations rereads the current observability and GitLab config from backend files.
+- **Save Observability** saves Prometheus URL, Elasticsearch URL, and Elasticsearch index for `observability-agent` and Supervisor tools.
+- **Test Prometheus** verifies the configured Prometheus URL.
+- **Test Elasticsearch** verifies the configured Elasticsearch URL and index.
+- **Save GitLab** saves GitLab URL, default project ID/path, and token for `repo-agent` and Supervisor tools.
+- **Test GitLab** verifies the configured GitLab access.
+
+### Agents page
+
+Use this page to verify the stack from the browser.
+
+- Health cards poll every 10 seconds for `history-agent`, `report-agent`, `supervisor-agent`, `observability-agent`, `repo-agent`, Prometheus, Alertmanager, Grafana, and node-exporter.
+- **Raw detail** expands the exact health response or error text for a node.
+- The healthy counter shows how many nodes are reachable through nginx.
+
+### Cortex Models page
+
+Use this page to control model routing and prompts while the app is running.
+
+- Each agent card controls one LLM-backed agent route: supervisor, report, observability, and repo.
+- **System prompt** expands the editable prompt sent to that agent model.
+- **Provider** selects the model provider for that agent.
+- **Model** selects one model from the provider's configured model list.
+- **Save & reload config** writes agent routes and prompts to `config/llm_config.json` and reloads the visible config.
+- **Test LLM call** sends a small test request through the selected provider/model for that agent.
+- **Save Provider Settings** saves provider base URLs and HTTP/SOCKS proxy URLs. Use this to route OpenRouter through a proxy such as `http://185.255.89.232:5070`.
+- **Save API Keys** writes pasted keys into the ignored runtime secret store; blank fields keep existing keys.
+- **Refresh** reloads the current LLM config from the backend.
 
 ---
 

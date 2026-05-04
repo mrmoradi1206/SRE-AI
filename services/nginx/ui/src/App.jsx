@@ -96,6 +96,107 @@ function safeJson(value) {
   }
 }
 
+function eventCategory(event) {
+  const text = `${event.actor || ''} ${event.event_type || ''}`.toLowerCase();
+  if (text.includes('supervisor')) return 'supervisor';
+  if (text.includes('observability') || text.includes('prometheus') || text.includes('elastic')) return 'observability';
+  if (text.includes('repo') || text.includes('gitlab')) return 'repo';
+  if (text.includes('report') || text.includes('mattermost')) return 'report';
+  if (text.includes('history') || text.includes('alert')) return 'history';
+  return 'system';
+}
+
+function eventSummary(event) {
+  const metadata = safeJson(event.metadata) || {};
+  const payload = safeJson(event.payload) || {};
+  const candidates = [
+    metadata.summary,
+    metadata.action,
+    metadata.reason,
+    metadata.message,
+    payload.summary,
+    payload.description,
+    payload.status,
+    payload.reason,
+  ];
+  const value = candidates.find((item) => typeof item === 'string' && item.trim());
+  if (value) return value.length > 220 ? `${value.slice(0, 220)}...` : value;
+  return `${event.actor || 'system'} recorded ${event.event_type || 'an event'}.`;
+}
+
+function InvestigationTimeline({ events, busy, onDeleteEvent }) {
+  const [filter, setFilter] = useState('all');
+  const filters = ['all', 'supervisor', 'observability', 'repo', 'report', 'history', 'system'];
+  const visibleEvents = events.filter((event) => filter === 'all' || eventCategory(event) === filter);
+
+  return (
+    <div className="panel span-2 investigation-timeline-panel">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">Investigation</p>
+          <h3>Timeline</h3>
+        </div>
+        <span className="count-pill">{visibleEvents.length}/{events.length} events</span>
+      </div>
+      <div className="timeline-filter-row">
+        {filters.map((item) => (
+          <button
+            key={item}
+            type="button"
+            className={filter === item ? 'timeline-filter active' : 'timeline-filter'}
+            onClick={() => setFilter(item)}
+          >
+            {item}
+          </button>
+        ))}
+      </div>
+      {!visibleEvents.length ? (
+        <EmptyState title="No timeline events" copy="No event stream entries match this filter for the incident." />
+      ) : (
+        <div className="investigation-timeline">
+          {visibleEvents.map((event, index) => {
+            const category = eventCategory(event);
+            return (
+              <article key={event.event_id} className={`investigation-event event-${category}`}>
+                <div className="timeline-rail" aria-hidden="true">
+                  <span>{String(index + 1).padStart(2, '0')}</span>
+                </div>
+                <div className="investigation-event-body">
+                  <div className="investigation-event-head">
+                    <div>
+                      <span className="count-pill">{category}</span>
+                      <h4>{event.event_type || 'timeline event'}</h4>
+                      <p>{eventSummary(event)}</p>
+                    </div>
+                    <div className="investigation-event-meta">
+                      <strong>{event.actor || 'system'}</strong>
+                      <span>{formatDate(event.created_at)}</span>
+                    </div>
+                  </div>
+                  <div className="action-row wrap">
+                    <details className="json-viewer compact-json">
+                      <summary>Raw metadata and payload</summary>
+                      <pre>{JSON.stringify({ metadata: safeJson(event.metadata), payload: safeJson(event.payload) }, null, 2)}</pre>
+                    </details>
+                    <button
+                      type="button"
+                      className="danger-button small-button"
+                      disabled={busy}
+                      onClick={() => onDeleteEvent(event)}
+                    >
+                      Delete event
+                    </button>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function incidentServiceName(incident) {
   const alert = incident?.alerts?.[0];
   const labels = alert?.payload?.labels || {};
@@ -938,33 +1039,7 @@ function IncidentDetailPage() {
         </div>
       </div>
 
-      <div className="panel span-2">
-        <div className="panel-header">
-          <h3>Timeline</h3>
-          <span>{incident.timeline.length} events</span>
-        </div>
-        <div className="timeline-grid">
-          {incident.timeline.map((event) => (
-            <article key={event.event_id} className="timeline-item">
-              <div className="timeline-meta">
-                <strong>{event.event_type}</strong>
-                <span>{event.actor}</span>
-                <span>{formatDate(event.created_at)}</span>
-              </div>
-              <button
-                type="button"
-                className="danger-button small-button"
-                disabled={busy}
-                onClick={() => deleteEvent(event)}
-              >
-                Delete event
-              </button>
-              <pre>{JSON.stringify({ metadata: event.metadata, payload: event.payload }, null, 2)}</pre>
-            </article>
-          ))}
-          {!incident.timeline.length ? <EmptyState title="No timeline events" copy="No event stream entries are available for this incident." /> : null}
-        </div>
-      </div>
+      <InvestigationTimeline events={incident.timeline} busy={busy} onDeleteEvent={deleteEvent} />
 
       <div className="panel span-2">
         <div className="panel-header">

@@ -574,6 +574,141 @@ button:disabled {
   margin-bottom: 0.75rem;
 }
 
+.investigation-timeline-panel::before {
+  background: linear-gradient(90deg, #c5772a, var(--accent), var(--info));
+}
+
+.timeline-filter-row {
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.timeline-filter {
+  width: auto;
+  padding: 0.48rem 0.78rem;
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  text-transform: capitalize;
+}
+
+.timeline-filter.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border-color: rgba(14, 107, 92, 0.34);
+}
+
+.investigation-timeline {
+  display: grid;
+  gap: 0.9rem;
+  position: relative;
+}
+
+.investigation-event {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr);
+  gap: 1rem;
+  position: relative;
+}
+
+.timeline-rail {
+  display: grid;
+  justify-items: center;
+  position: relative;
+}
+
+.timeline-rail::before {
+  content: "";
+  position: absolute;
+  top: 2.9rem;
+  bottom: -1rem;
+  width: 2px;
+  background: linear-gradient(180deg, rgba(14, 107, 92, 0.28), rgba(197, 119, 42, 0.12));
+}
+
+.investigation-event:last-child .timeline-rail::before {
+  display: none;
+}
+
+.timeline-rail span {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 999px;
+  border: 1px solid rgba(14, 107, 92, 0.24);
+  background: linear-gradient(135deg, rgba(14, 107, 92, 0.14), rgba(197, 119, 42, 0.16)), var(--panel);
+  color: var(--accent-strong);
+  font-weight: 1000;
+}
+
+.investigation-event-body {
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(14, 107, 92, 0.09), transparent 9rem),
+    rgba(255, 255, 255, 0.58);
+}
+
+.investigation-event-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: start;
+}
+
+.investigation-event-head h4 {
+  margin: 0.55rem 0 0.35rem;
+  font-size: 1.15rem;
+}
+
+.investigation-event-head p,
+.investigation-event-meta span {
+  color: var(--muted);
+}
+
+.investigation-event-meta {
+  display: grid;
+  gap: 0.25rem;
+  text-align: right;
+  min-width: 13rem;
+}
+
+.compact-json {
+  flex: 1 1 320px;
+}
+
+.compact-json summary {
+  cursor: pointer;
+  padding: 0.65rem 0.8rem;
+  font-weight: 900;
+}
+
+.compact-json pre {
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+
+.event-supervisor .timeline-rail span {
+  border-color: rgba(197, 119, 42, 0.35);
+  color: #9a5f17;
+}
+
+.event-observability .timeline-rail span {
+  border-color: rgba(19, 108, 148, 0.35);
+  color: var(--info);
+}
+
+.event-report .timeline-rail span {
+  border-color: rgba(56, 128, 83, 0.35);
+  color: var(--success);
+}
+
 .status-chip,
 .severity-chip {
   display: inline-flex;
@@ -699,6 +834,8 @@ textarea:focus {
 :root[data-theme="dark"] .incident-row,
 :root[data-theme="dark"] .stack-item,
 :root[data-theme="dark"] .timeline-item,
+:root[data-theme="dark"] .investigation-event-body,
+:root[data-theme="dark"] .timeline-filter,
 :root[data-theme="dark"] .health-card,
 :root[data-theme="dark"] .workflow-node,
 :root[data-theme="dark"] .prompt-card,
@@ -1017,6 +1154,24 @@ textarea:focus {
   .workflow-rail,
   .badge-row {
     grid-template-columns: 1fr;
+  }
+
+  .investigation-event,
+  .investigation-event-head {
+    grid-template-columns: 1fr;
+  }
+
+  .timeline-rail {
+    justify-items: start;
+  }
+
+  .timeline-rail::before {
+    display: none;
+  }
+
+  .investigation-event-meta {
+    min-width: 0;
+    text-align: left;
   }
 
   .span-2 {
