@@ -122,6 +122,7 @@ docker compose port nginx 80
 - Use the SPA directly:
 
   - `/` — Dashboard
+  - `/how-it-works` — Visual Cortex architecture and request-flow map
   - `/incidents` — Incident queue with filtering
   - `/incidents/:incidentId` — Incident details and timeline
   - `/workflow` — End-to-end workflow simulator
@@ -138,6 +139,7 @@ The UI is the operator command center. It is designed around one rule: `supervis
 ### Global navigation and header
 
 - **Dashboard** opens the Cortex overview with current incident posture and recent signals.
+- **How It Works** opens a visual map of the Cortex brain, agents, memory, integrations, and alert-to-resolution flow.
 - **Incidents** opens the triage queue where you search, filter, open, or delete incidents.
 - **Test Workflow** opens a safe end-to-end simulator for a synthetic alert.
 - **Integrations** opens all external connection settings: Alertmanager, Mattermost, Prometheus, Elasticsearch, and GitLab.
@@ -153,6 +155,18 @@ The dashboard is a read-only operations overview.
 - **See all** opens the full Incidents queue.
 - **Recent incidents** cards open the selected incident detail page.
 - **Recent alerts** shows the latest alert samples from the last 24 hours.
+
+### How It Works page
+
+Use this page to explain Cortex to operators, teammates, and stakeholders.
+
+- **Connect integrations** opens the Integrations page so you can wire Alertmanager, Mattermost, Prometheus, Elasticsearch, and GitLab.
+- **Run test workflow** opens the simulator so you can send a synthetic alert through the whole Cortex loop.
+- **Orbit diagram** shows Supervisor at the center with History, Observability, Repo, and Report agents around it.
+- **Alert to resolution** shows the five-step flow from signal ingestion to long-term learning.
+- **Cortex parts** explains every major module in the app.
+- **How Supervisor thinks** explains the ReAct loop: Thought, Action, Observation, Decision.
+- **How SREs use it** explains the operator path: open incident, review logs, run integrations, generate report, approve and learn.
 
 ### Incidents page
 

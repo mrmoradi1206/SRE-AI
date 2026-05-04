@@ -30,6 +30,7 @@ const SAMPLE_ALERT = {
 };
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', hint: 'Cortex overview' },
+  { to: '/how-it-works', label: 'How It Works', hint: 'Cortex flow map' },
   { to: '/incidents', label: 'Incidents', hint: 'Triage queue' },
   { to: '/workflow', label: 'Test Workflow', hint: 'End-to-end drill' },
   { to: '/integrations', label: 'Integrations', hint: 'Alertmanager webhook' },
@@ -40,6 +41,48 @@ const OPS_SIGNALS = [
   ['99.95%', 'target SLO'],
   ['< 4h', 'default SLA'],
   ['Cortex', 'commander'],
+];
+const CORTEX_FLOW = [
+  {
+    phase: 'Signal enters',
+    title: 'Alertmanager or UI sends an alert',
+    agent: 'nginx + history-agent',
+    copy: 'Nginx receives browser/API/webhook traffic. History validates the payload, deduplicates it, opens or updates an incident, and writes append-only events.',
+  },
+  {
+    phase: 'Brain starts',
+    title: 'Supervisor becomes commander',
+    agent: 'supervisor-agent',
+    copy: 'Supervisor loads incident context, retrieves similar learned incidents, and starts a ReAct loop: think, call a tool, observe evidence, then decide.',
+  },
+  {
+    phase: 'Evidence loop',
+    title: 'Specialist agents report back',
+    agent: 'observability-agent + repo-agent',
+    copy: 'Observability checks Prometheus and Elasticsearch. Repo checks GitLab commits and merge requests. Both can use LLMs, but their answer goes back to Supervisor.',
+  },
+  {
+    phase: 'Operator output',
+    title: 'Report and channel delivery',
+    agent: 'report-agent + Mattermost',
+    copy: 'Report turns Supervisor context into an SRE-ready summary, stores it on the incident, and sends it to Mattermost when delivery is enabled.',
+  },
+  {
+    phase: 'Learn',
+    title: 'Approved fixes become memory',
+    agent: 'pgvector',
+    copy: 'When an SRE clicks Approve & Learn, the final root cause and resolution become long-term knowledge for future Cortex investigations.',
+  },
+];
+const CORTEX_PARTS = [
+  ['History', 'Deduplicates alerts, owns incident state, stores raw samples and timeline events.'],
+  ['Supervisor', 'The brain and commander. Runs ReAct, calls tools, decides lifecycle and next actions.'],
+  ['Observability', 'Reads Prometheus metrics and Elasticsearch logs, then returns evidence to Supervisor.'],
+  ['Repo', 'Reads GitLab commits/MRs, finds risky changes, and returns code evidence to Supervisor.'],
+  ['Report', 'Builds final incident reports and sends them to Mattermost or other channels.'],
+  ['Memory', 'Redis keeps short-term ReAct traces. pgvector stores approved long-term lessons.'],
+  ['Integrations', 'Alertmanager, Mattermost, Prometheus, Elasticsearch, GitLab, LLM providers, and proxies.'],
+  ['UI', 'Cortex Command Center for triage, agent logs, investigations, configuration, and cleanup.'],
 ];
 
 async function apiFetch(path, options = {}) {
@@ -621,6 +664,111 @@ function DashboardPage() {
           ))}
           {!recentAlerts.length && !error ? <EmptyState title="Quiet window" copy="No alerts returned for the last 24 hours." /> : null}
         </div>
+      </div>
+    </section>
+  );
+}
+
+function HowItWorksPage() {
+  return (
+    <section className="page-grid how-page">
+      <div className="hero-card span-2 cortex-hero">
+        <div className="hero-copy">
+          <p className="eyebrow">How Cortex works</p>
+          <h3>One command brain, many specialist senses</h3>
+          <p>
+            Cortex is built like an incident-response nervous system: alerts enter through the edge, History keeps the
+            memory, Supervisor commands the investigation, specialist agents bring evidence, and Report turns the final
+            decision into operator-ready communication.
+          </p>
+          <div className="action-row wrap">
+            <Link className="hero-cta" to="/integrations">Connect integrations</Link>
+            <Link className="hero-cta secondary" to="/workflow">Run test workflow</Link>
+          </div>
+        </div>
+        <div className="cortex-orbit" aria-label="Cortex agent relationship diagram">
+          <div className="orbit-ring ring-one" />
+          <div className="orbit-ring ring-two" />
+          <div className="orbit-core">Supervisor</div>
+          <span className="orbit-node node-history">History</span>
+          <span className="orbit-node node-obs">Observability</span>
+          <span className="orbit-node node-repo">Repo</span>
+          <span className="orbit-node node-report">Report</span>
+        </div>
+      </div>
+
+      <div className="panel span-2 cortex-map-panel">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Live flow</p>
+            <h3>Alert to resolution</h3>
+          </div>
+          <span className="count-pill">Supervisor-first</span>
+        </div>
+        <div className="flow-river" aria-label="Cortex request flow">
+          {CORTEX_FLOW.map((step, index) => (
+            <article key={step.phase} className="flow-step">
+              <div className="flow-marker">{index + 1}</div>
+              <div>
+                <span className="count-pill">{step.phase}</span>
+                <h4>{step.title}</h4>
+                <strong>{step.agent}</strong>
+                <p>{step.copy}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+
+      <div className="panel span-2">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Architecture</p>
+            <h3>Cortex parts</h3>
+          </div>
+          <span className="count-pill">{CORTEX_PARTS.length} modules</span>
+        </div>
+        <div className="part-grid">
+          {CORTEX_PARTS.map(([title, copy]) => (
+            <article key={title} className="part-card">
+              <div className="part-glyph">{title.slice(0, 2).toUpperCase()}</div>
+              <h4>{title}</h4>
+              <p>{copy}</p>
+            </article>
+          ))}
+        </div>
+      </div>
+
+      <div className="panel cortex-loop-card">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">ReAct loop</p>
+            <h3>How Supervisor thinks</h3>
+          </div>
+        </div>
+        <div className="loop-stack">
+          <div><span>Thought</span><p>What is the most likely failure path?</p></div>
+          <div><span>Action</span><p>Call observability or repo tools for evidence.</p></div>
+          <div><span>Observation</span><p>Read metrics, logs, commits, and previous incident memories.</p></div>
+          <div><span>Decision</span><p>Recommend investigation, mitigation, resolution, and report content.</p></div>
+        </div>
+      </div>
+
+      <div className="panel cortex-loop-card">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Operator loop</p>
+            <h3>How SREs use it</h3>
+          </div>
+        </div>
+        <div className="operator-path">
+          <Link to="/incidents">Open incident</Link>
+          <span>Review agent logs</span>
+          <span>Run integrations</span>
+          <span>Generate report</span>
+          <span>Approve & Learn</span>
+        </div>
+        <p className="muted-text">The UI keeps raw payloads available, but the primary experience is the Cortex command log and investigation timeline.</p>
       </div>
     </section>
   );
@@ -2035,6 +2183,7 @@ export default function App() {
     <Shell>
       <Routes>
         <Route path="/" element={<DashboardPage />} />
+        <Route path="/how-it-works" element={<HowItWorksPage />} />
         <Route path="/workflow" element={<WorkflowTestPage />} />
         <Route path="/integrations" element={<IntegrationPage />} />
         <Route path="/incidents" element={<IncidentsPage />} />
