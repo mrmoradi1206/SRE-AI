@@ -222,6 +222,10 @@ Use this page to verify the full Cortex loop without waiting for a real alert.
 
 Use this page to connect external systems without rebuilding containers.
 
+- **Alert ingestion mode** lets you choose how Cortex receives Alertmanager alerts:
+  - **Push webhook**: Alertmanager posts alerts to Cortex.
+  - **Pull API polling**: Cortex polls Alertmanager active alerts every interval.
+  - **Both modes**: useful during migration; Cortex deduplicates repeated active alerts.
 - **Submit Endpoint Changes** saves the Alertmanager public IP/DNS/port in browser storage and rebuilds the displayed webhook URL, YAML, and curl examples.
 - **Endpoint Saved** means the displayed endpoint already matches the saved browser value.
 - **Copy saved URL** copies the saved Alertmanager webhook URL.
@@ -229,6 +233,9 @@ Use this page to connect external systems without rebuilding containers.
 - **Open incidents** jumps to the incident queue after sending or configuring alerts.
 - **Copy YAML** copies the Alertmanager receiver snippet. Keep `send_resolved: true` so resolved notifications close Cortex incidents.
 - **Copy curl** copies a manual webhook test command.
+- **Save Polling** enables pull mode when Alertmanager cannot call Cortex. `history-agent` polls the configured Alertmanager `/api/v2/alerts` endpoint on the selected interval.
+- **Poll Now** immediately reads active Alertmanager alerts and ingests only new alerts that Cortex has not already seen.
+- **Reload** in Alertmanager API polling refreshes the saved poller config and latest poll status.
 - **Save Mattermost** saves the Mattermost webhook, enabled state, channel override, bot username, and icon URL.
 - **Send Mattermost Test** sends a test message through the saved Mattermost integration.
 - **Reload** in Data integrations rereads the current observability and GitLab config from backend files.
@@ -378,6 +385,10 @@ All frontend/API traffic is served through one listener, prefixed by `/api`:
   - `GET /api/history/ready`
   - `POST /api/history/alerts`
   - `POST /api/alertmanager/webhook` (Alertmanager-compatible webhook forwarded to alert ingestion)
+  - `GET /api/history/alertmanager/poll/config`
+  - `PUT /api/history/alertmanager/poll/config`
+  - `POST /api/history/alertmanager/poll/run`
+  - `GET /api/history/alertmanager/poll/status`
   - `GET /api/history/incidents`
   - `GET /api/history/incidents/{incident_id}`
   - `GET /api/history/incidents/{incident_id}/events/replay`
@@ -507,6 +518,23 @@ Every firing Alertmanager alert is ingested by `history-agent`. The ingestion pa
 
 Keep `send_resolved: true`. When Alertmanager sends a resolved notification, `history-agent` attaches that final alert to the matching incident and marks the incident `resolved` without running a new LLM workflow.
 
+Pull active alerts from Alertmanager API:
+
+1. Open `http://<server-ip>:8080/integrations`.
+2. In **Alertmanager API polling**, enable pull mode.
+3. Set **Alertmanager URL**, for example:
+
+```text
+https://alert.dr-msh.snpb.app
+```
+
+4. Keep the interval at `10` seconds or set any value between `5` and `300`.
+5. Set a proxy only if the Cortex server needs one to reach Alertmanager.
+6. Click **Save Polling**.
+7. Click **Poll Now** to test immediately.
+
+When enabled, `history-agent` calls `GET /api/v2/alerts?active=true&silenced=false&inhibited=false&unprocessed=true` on that Alertmanager URL every interval. New active alerts are converted into Cortex alerts with source `alertmanager-poll`, deduplicated by Alertmanager fingerprint/labels/start time, then the normal History -> Supervisor -> Report workflow starts. Duplicate active alerts are skipped, so polling every 10 seconds does not create repeated incidents for the same alert.
+
 Each incident detail page includes a Cortex command log. It shows Supervisor as the brain/commander, includes History, Observability, Repo, and Report agent actions, exposes sanitized LLM traces and raw action details, and shows channel delivery records such as whether Mattermost delivery was sent, skipped, or failed. The same enriched data is available from `GET /api/report/{incident_id}/workflow-summary`.
 
 Incidents and timeline events can be deleted from the UI when cleaning test data. Use the Incidents page delete button to remove an incident together with its alerts, timeline events, and queued actions, or open an incident and use `Delete event` on a single timeline entry. The matching APIs are `DELETE /api/history/incidents/{incident_id}` and `DELETE /api/history/incidents/{incident_id}/events/{event_id}`.
@@ -599,6 +627,9 @@ There is no history model setting by design. `history-agent` is deterministic an
   - `VITE_API_BASE_URL` (defaults to `/api`)
 - Security and ingestion behavior
   - `ALERT_WEBHOOK_SECRET` (optional webhook signature enforcement)
+  - `ALERTMANAGER_URL`, `ALERTMANAGER_POLL_ENABLED`, `ALERTMANAGER_POLL_INTERVAL_SECONDS`
+  - `ALERTMANAGER_POLL_TIMEOUT_SECONDS`, `ALERTMANAGER_POLL_VERIFY_TLS`, `ALERTMANAGER_POLL_PROXY_URL`
+  - `ALERTMANAGER_POLL_CONFIG_PATH`
   - `MAX_ALERT_JSON_BYTES`, `MAX_ALERT_BATCH_SIZE`
   - `DEFAULT_SLA_HOURS`, `REOPEN_STALE_AFTER_HOURS`
 - LLM and HTTP

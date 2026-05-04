@@ -1801,6 +1801,76 @@ function PlatformIntegrationSettings() {
   );
 }
 
+function AlertmanagerIngestionMode({ pollConfig, onSelectMode }) {
+  const [mode, setMode] = useState(window.localStorage.getItem('cortex-alertmanager-ingestion-mode') || 'both');
+
+  const choose = async (nextMode) => {
+    setMode(nextMode);
+    window.localStorage.setItem('cortex-alertmanager-ingestion-mode', nextMode);
+    await onSelectMode?.(nextMode);
+  };
+
+  const cards = [
+    {
+      id: 'push',
+      title: 'Push webhook',
+      badge: 'recommended when Cortex is reachable',
+      copy: 'Alertmanager sends every firing/resolved alert directly to Cortex. This is fastest and includes resolved notifications.',
+      steps: ['Copy the webhook URL', 'Paste it into Alertmanager receivers', 'Keep send_resolved: true'],
+    },
+    {
+      id: 'pull',
+      title: 'Pull API polling',
+      badge: 'best when webhooks cannot reach Cortex',
+      copy: 'Cortex reads Alertmanager active alerts every 10 seconds and starts the same History -> Supervisor -> Report flow for new alerts.',
+      steps: ['Enter Alertmanager URL', 'Enable pull mode', 'Click Poll Now to test'],
+    },
+    {
+      id: 'both',
+      title: 'Both modes',
+      badge: 'safe migration mode',
+      copy: 'Use webhook and polling together while migrating. Cortex deduplicates by event key/idempotency so repeated active alerts are skipped.',
+      steps: ['Configure webhook', 'Enable polling', 'Watch duplicates counter'],
+    },
+  ];
+
+  return (
+    <div className="panel integration-card span-2 ingestion-mode-card">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">Alert ingestion mode</p>
+          <h3>Choose how Cortex gets alerts</h3>
+        </div>
+        <span className="count-pill">{mode}</span>
+      </div>
+      <p>
+        Cortex supports both push and pull. Push is event-driven from Alertmanager webhooks. Pull asks Alertmanager
+        for active alerts every {pollConfig?.interval_seconds || 10}s and ingests new alerts automatically.
+      </p>
+      <div className="ingestion-mode-grid">
+        {cards.map((card) => (
+          <article key={card.id} className={mode === card.id ? 'ingestion-mode-option active' : 'ingestion-mode-option'}>
+            <div className="panel-header compact">
+              <div>
+                <p className="eyebrow">{card.badge}</p>
+                <h3>{card.title}</h3>
+              </div>
+              <input type="radio" checked={mode === card.id} onChange={() => choose(card.id)} aria-label={card.title} />
+            </div>
+            <p>{card.copy}</p>
+            <ul>
+              {card.steps.map((step) => <li key={step}>{step}</li>)}
+            </ul>
+            <button type="button" className={mode === card.id ? '' : 'ghost-button'} onClick={() => choose(card.id)}>
+              {mode === card.id ? 'Selected' : `Use ${card.title}`}
+            </button>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AlertmanagerConnection() {
   const stored = (() => {
     try {
@@ -2004,7 +2074,169 @@ function AlertmanagerConnection() {
   );
 }
 
+function AlertmanagerPollingSettings({ config, setConfig }) {
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const [pollResult, setPollResult] = useState(null);
+
+  const load = async () => {
+    setError('');
+    try {
+      const next = await apiFetch('/history/alertmanager/poll/config');
+      setConfig(next);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    const timer = window.setInterval(() => {
+      apiFetch('/history/alertmanager/poll/status')
+        .then((status) => setConfig((current) => ({ ...(current || {}), status })))
+        .catch(() => {});
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const update = (patch) => setConfig((current) => ({ ...(current || {}), ...patch }));
+
+  const save = async () => {
+    setBusy('save');
+    setMessage('');
+    setError('');
+    try {
+      const payload = {
+        enabled: Boolean(config.enabled),
+        url: config.url,
+        interval_seconds: Number(config.interval_seconds || 10),
+        timeout_seconds: Number(config.timeout_seconds || 10),
+        verify_tls: Boolean(config.verify_tls),
+        proxy_url: config.proxy_url || '',
+      };
+      const next = await apiFetch('/history/alertmanager/poll/config', { method: 'PUT', body: JSON.stringify(payload) });
+      setConfig(next);
+      setMessage('Alertmanager API polling saved. History-agent will check active alerts on this interval.');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const runNow = async () => {
+    setBusy('run');
+    setMessage('');
+    setError('');
+    try {
+      const result = await apiFetch('/history/alertmanager/poll/run', { method: 'POST', body: JSON.stringify({}) });
+      setPollResult(result);
+      setConfig((current) => ({ ...(current || {}), status: result }));
+      setMessage(result.last_error ? `Poll finished with error: ${result.last_error}` : `Poll finished. Seen ${result.last_seen_alerts}, ingested ${result.last_ingested}, duplicates ${result.duplicates}.`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  if (!config) {
+    return (
+      <div className="panel integration-card span-2">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Alertmanager API polling</p>
+            <h3>Loading poller config</h3>
+          </div>
+        </div>
+        {error ? <p className="error-text">{error}</p> : <p>Reading history-agent poller settings...</p>}
+      </div>
+    );
+  }
+
+  const status = config.status || {};
+
+  return (
+    <div className="panel integration-card span-2 alertmanager-poll-card">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">Alertmanager API polling</p>
+          <h3>Pull active alerts every {config.interval_seconds || 10}s</h3>
+        </div>
+        <StatusChip status={config.enabled ? (status.last_error ? 'failed' : 'resolved') : 'open'} />
+      </div>
+      <p>
+        Enable this when Alertmanager cannot send webhooks to Cortex. History-agent calls
+        <code> /api/v2/alerts</code>, ingests only new active alerts by event key, and then queues the normal
+        Supervisor - Report workflow.
+      </p>
+      <div className="secret-grid">
+        <label className="toggle-row">
+          <input type="checkbox" checked={Boolean(config.enabled)} onChange={(event) => update({ enabled: event.target.checked })} />
+          Enable pull mode
+        </label>
+        <label>
+          Alertmanager URL
+          <span className="field-hint">Example: https://alert.dr-msh.snpb.app or http://alertmanager:9093</span>
+          <input value={config.url || ''} onChange={(event) => update({ url: event.target.value.trim() })} />
+        </label>
+        <label>
+          Poll interval seconds
+          <input type="number" min="5" max="300" value={config.interval_seconds || 10} onChange={(event) => update({ interval_seconds: event.target.value })} />
+        </label>
+        <label>
+          Timeout seconds
+          <input type="number" min="1" max="60" value={config.timeout_seconds || 10} onChange={(event) => update({ timeout_seconds: event.target.value })} />
+        </label>
+        <label>
+          Proxy URL
+          <span className="field-hint">Optional. Example: http://185.255.89.232:5070</span>
+          <input value={config.proxy_url || ''} onChange={(event) => update({ proxy_url: event.target.value.trim() })} />
+        </label>
+        <label className="toggle-row">
+          <input type="checkbox" checked={Boolean(config.verify_tls)} onChange={(event) => update({ verify_tls: event.target.checked })} />
+          Verify HTTPS certificate
+        </label>
+      </div>
+      <div className="action-row wrap">
+        <button type="button" disabled={Boolean(busy)} onClick={save}>{busy === 'save' ? 'Saving...' : 'Save Polling'}</button>
+        <button type="button" className="ghost-button" disabled={Boolean(busy)} onClick={runNow}>{busy === 'run' ? 'Polling...' : 'Poll Now'}</button>
+        <button type="button" className="ghost-button" disabled={Boolean(busy)} onClick={load}>Reload</button>
+      </div>
+      <div className="commander-strip">
+        <div><span>Poller</span><strong>{status.running ? 'running' : 'stopped'}</strong></div>
+        <div><span>Last seen</span><strong>{status.last_seen_alerts ?? 0}</strong></div>
+        <div><span>Ingested</span><strong>{status.last_ingested ?? 0}</strong></div>
+        <div><span>Duplicates</span><strong>{status.duplicates ?? 0}</strong></div>
+      </div>
+      {status.last_error ? <p className="error-text">{status.last_error}</p> : null}
+      {message ? <p className="success-text">{message}</p> : null}
+      {error ? <p className="error-text">{error}</p> : null}
+      {pollResult ? <JsonBlock title="Latest poll result" data={pollResult} /> : null}
+    </div>
+  );
+}
+
 function IntegrationPage() {
+  const [alertmanagerPollConfig, setAlertmanagerPollConfig] = useState(null);
+
+  const chooseAlertmanagerMode = async (mode) => {
+    if (!alertmanagerPollConfig) return;
+    const shouldEnablePull = mode === 'pull' || mode === 'both';
+    if (Boolean(alertmanagerPollConfig.enabled) === shouldEnablePull) return;
+    const payload = {
+      enabled: shouldEnablePull,
+      url: alertmanagerPollConfig.url,
+      interval_seconds: Number(alertmanagerPollConfig.interval_seconds || 10),
+      timeout_seconds: Number(alertmanagerPollConfig.timeout_seconds || 10),
+      verify_tls: Boolean(alertmanagerPollConfig.verify_tls),
+      proxy_url: alertmanagerPollConfig.proxy_url || '',
+    };
+    const next = await apiFetch('/history/alertmanager/poll/config', { method: 'PUT', body: JSON.stringify(payload) });
+    setAlertmanagerPollConfig(next);
+  };
+
   return (
     <section className="page-grid integrations-page">
       <div className="hero-card span-2 integrations-hero">
@@ -2023,7 +2255,9 @@ function IntegrationPage() {
         ]} />
       </div>
 
+      <AlertmanagerIngestionMode pollConfig={alertmanagerPollConfig} onSelectMode={chooseAlertmanagerMode} />
       <AlertmanagerConnection />
+      <AlertmanagerPollingSettings config={alertmanagerPollConfig} setConfig={setAlertmanagerPollConfig} />
       <MattermostIntegration />
       <PlatformIntegrationSettings />
     </section>

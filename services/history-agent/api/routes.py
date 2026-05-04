@@ -5,6 +5,7 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,11 +16,22 @@ from aiops_shared.replay import replay_incident_stream
 from aiops_shared.schemas import AlertBatchIn, AlertIn, AlertOut, DashboardStats, EventEnvelopeOut, IncidentListItem, IncidentOut, IncidentReplayOut
 from aiops_shared.utils import clamp_page_size, health_payload
 
+from core.alertmanager_config import AlertmanagerConfigError, load_alertmanager_poll_config, save_alertmanager_poll_config
+from core.alertmanager_poll import poll_once, poller_status
 from core.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, SERVICE_NAME
 from core.search import apply_incident_filters, build_incident_detail, list_incidents_with_aggregates
 from core.storage import dashboard_counts, ingest_alert, ingest_alert_batch, recent_alerts_summary, translate_integrity_error
 
 router = APIRouter()
+
+
+class AlertmanagerPollConfigIn(BaseModel):
+    enabled: bool = False
+    url: str = Field(default='http://alertmanager:9093', max_length=500)
+    interval_seconds: int = Field(default=10, ge=5, le=300)
+    timeout_seconds: float = Field(default=10, ge=1, le=60)
+    verify_tls: bool = True
+    proxy_url: str = Field(default='', max_length=500)
 
 
 def _parse_uuid(value: str, name: str = 'id') -> UUID:
@@ -75,6 +87,31 @@ async def ready(session: AsyncSession = Depends(get_db)) -> dict:
     except Exception as exc:
         raise HTTPException(status_code=503, detail='database unavailable') from exc
     return health_payload(SERVICE_NAME, 'connected', readiness='ready')
+
+
+@router.get('/alertmanager/poll/config')
+async def get_alertmanager_poll_config() -> dict:
+    config = load_alertmanager_poll_config()
+    return {**config, 'status': poller_status()}
+
+
+@router.put('/alertmanager/poll/config')
+async def put_alertmanager_poll_config(payload: AlertmanagerPollConfigIn) -> dict:
+    try:
+        config = save_alertmanager_poll_config(payload.model_dump())
+    except AlertmanagerConfigError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {**config, 'status': poller_status()}
+
+
+@router.post('/alertmanager/poll/run')
+async def run_alertmanager_poll_now() -> dict:
+    return await poll_once()
+
+
+@router.get('/alertmanager/poll/status')
+async def get_alertmanager_poll_status() -> dict:
+    return poller_status()
 
 
 @router.post('/alerts', status_code=201)
