@@ -5,7 +5,7 @@ import os
 import time
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,6 +53,15 @@ class IncidentApproveIn(BaseModel):
     summary: str | None = Field(default=None, max_length=2000)
     service: str | None = Field(default=None, max_length=200)
     severity: str | None = Field(default=None, max_length=80)
+
+
+class SupervisorChatIn(BaseModel):
+    question: str = Field(min_length=3, max_length=2000)
+
+
+class WarRoomChatIn(BaseModel):
+    question: str = Field(min_length=3, max_length=2000)
+    incident_limit: int = Field(default=8, ge=1, le=20)
 
 http_client = AsyncServiceClient(
     timeout=HTTP_TIMEOUT,
@@ -535,6 +544,122 @@ async def approve_incident_v1(incident_id: str, payload: IncidentApproveIn, requ
     await session.commit()
     return {'saved': True, 'knowledge': saved}
 
+
+@plain_router.post('/api/v1/incidents/{incident_id}/chat')
+async def incident_chat_v1(incident_id: str, payload: SupervisorChatIn, request: Request, session: AsyncSession = Depends(get_db)) -> dict:
+    response = await http_client.get(f'{HISTORY_AGENT_URL}/incidents/{incident_id}')
+    incident_bundle = normalize_incident_bundle(response.json())
+    chat_result = await service.answer_operator_question(incident_bundle, payload.question)
+    async with session.begin():
+        incident = (await session.execute(select(Incident).where(Incident.id == UUID(str(incident_id))))).scalar_one_or_none()
+        if incident is not None:
+            await append_event(
+                session,
+                stream_id=incident.id,
+                event_type='supervisor.chat_answered',
+                actor='supervisor',
+                correlation_id=_correlation_uuid(request),
+                payload={
+                    'question': payload.question,
+                    'answer': chat_result.get('answer'),
+                    'confidence': chat_result.get('confidence'),
+                    'next_actions': chat_result.get('next_actions', []),
+                    'agent_summary': chat_result.get('agent_summary', {}),
+                },
+                metadata=_metadata(request) | {'provider': chat_result.get('provider'), 'model': chat_result.get('model')},
+            )
+    return chat_result
+
+
+def _event_as_log(event: dict, incident_id: str, incident_summary: str | None = None) -> dict:
+    payload = event.get('payload') if isinstance(event.get('payload'), dict) else {}
+    metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
+    details = payload if payload else metadata
+    return {
+        'incident_id': incident_id,
+        'incident_summary': incident_summary,
+        'event_id': event.get('event_id'),
+        'event_type': event.get('event_type'),
+        'actor': event.get('actor'),
+        'created_at': event.get('created_at'),
+        'details': details,
+    }
+
+
+@plain_router.post('/api/v1/war-room/chat')
+async def war_room_chat_v1(payload: WarRoomChatIn) -> dict:
+    incidents_response = await http_client.get(
+        f'{HISTORY_AGENT_URL}/incidents',
+        params={'page': 1, 'page_size': payload.incident_limit},
+    )
+    items = incidents_response.json().get('items', [])
+    bundles: list[dict] = []
+    for item in items:
+        incident_id = item.get('id')
+        if not incident_id:
+            continue
+        detail = await http_client.get(f'{HISTORY_AGENT_URL}/incidents/{incident_id}')
+        bundles.append(normalize_incident_bundle(detail.json()))
+
+    aggregated_timeline: list[dict] = []
+    aggregated_alerts: list[dict] = []
+    summaries: list[dict] = []
+    for bundle in bundles:
+        incident = bundle.get('incident', {})
+        timeline = bundle.get('timeline', [])[:10]
+        alerts = bundle.get('alerts', [])[:5]
+        aggregated_timeline.extend(timeline)
+        aggregated_alerts.extend(alerts)
+        summaries.append(
+            {
+                'id': incident.get('id'),
+                'summary': incident.get('summary'),
+                'severity': incident.get('severity'),
+                'status': incident.get('status'),
+                'last_seen_at': incident.get('last_seen_at'),
+            }
+        )
+    war_bundle = {
+        'incident': {
+            'id': 'war-room',
+            'summary': f'Global war room context across {len(summaries)} incidents',
+            'severity': 'mixed',
+            'status': 'investigating',
+        },
+        'alerts': aggregated_alerts[:50],
+        'timeline': aggregated_timeline[:120],
+        'similar_incidents': [],
+    }
+    chat_result = await service.answer_operator_question(war_bundle, payload.question)
+    chat_result['incidents'] = summaries
+    chat_result['scope'] = 'global'
+    return chat_result
+
+
+@plain_router.get('/api/v1/war-room/logs')
+async def war_room_logs_v1(limit_incidents: int = Query(default=10, ge=1, le=30), per_incident_events: int = Query(default=25, ge=1, le=100)) -> dict:
+    incidents_response = await http_client.get(
+        f'{HISTORY_AGENT_URL}/incidents',
+        params={'page': 1, 'page_size': limit_incidents},
+    )
+    items = incidents_response.json().get('items', [])
+    logs: list[dict] = []
+    for item in items:
+        incident_id = item.get('id')
+        if not incident_id:
+            continue
+        detail = await http_client.get(f'{HISTORY_AGENT_URL}/incidents/{incident_id}')
+        incident_bundle = normalize_incident_bundle(detail.json())
+        incident = incident_bundle.get('incident', {})
+        for event in incident_bundle.get('timeline', [])[:per_incident_events]:
+            actor = str(event.get('actor') or '')
+            event_type = str(event.get('event_type') or '')
+            text = f'{actor} {event_type}'.lower()
+            if any(token in text for token in ('supervisor', 'observability', 'repo', 'report', 'history', 'agent')):
+                logs.append(_event_as_log(event, str(incident.get('id') or incident_id), incident.get('summary')))
+    logs.sort(key=lambda item: str(item.get('created_at') or ''), reverse=True)
+    return {'items': logs[:400], 'count': min(len(logs), 400)}
+
 @router.get('/incidents/{incident_id}')
 async def supervisor_view(incident_id: str) -> dict:
     response = await http_client.get(f'{HISTORY_AGENT_URL}/incidents/{incident_id}')
@@ -557,6 +682,21 @@ async def supervisor_incident_similar(incident_id: str, session: AsyncSession = 
 @router.post('/incidents/{incident_id}/approve')
 async def supervisor_incident_approve(incident_id: str, payload: IncidentApproveIn, request: Request, session: AsyncSession = Depends(get_db)) -> dict:
     return await approve_incident_v1(incident_id, payload, request, session)
+
+
+@router.post('/incidents/{incident_id}/chat')
+async def supervisor_incident_chat(incident_id: str, payload: SupervisorChatIn, request: Request, session: AsyncSession = Depends(get_db)) -> dict:
+    return await incident_chat_v1(incident_id, payload, request, session)
+
+
+@router.post('/war-room/chat')
+async def supervisor_war_room_chat(payload: WarRoomChatIn) -> dict:
+    return await war_room_chat_v1(payload)
+
+
+@router.get('/war-room/logs')
+async def supervisor_war_room_logs(limit_incidents: int = Query(default=10, ge=1, le=30), per_incident_events: int = Query(default=25, ge=1, le=100)) -> dict:
+    return await war_room_logs_v1(limit_incidents=limit_incidents, per_incident_events=per_incident_events)
 
 @router.get('/settings', response_model=AISettingsOut)
 async def get_settings(session: AsyncSession = Depends(get_db)) -> AISettingsOut:

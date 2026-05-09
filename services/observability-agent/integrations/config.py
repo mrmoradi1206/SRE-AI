@@ -8,6 +8,11 @@ from typing import Any
 CONFIG_PATH = Path(os.getenv('OBSERVABILITY_INTEGRATIONS_CONFIG_PATH', '/app/config/observability_integrations.json'))
 DEFAULT_CONFIG: dict[str, Any] = {
     'prometheus': {'url': os.getenv('PROMETHEUS_URL', 'http://prometheus:9090')},
+    'victoriametrics': {
+        'url': os.getenv('VICTORIAMETRICS_URL', 'http://victoriametrics:8428'),
+        'enabled': os.getenv('VICTORIAMETRICS_ENABLED', 'false').lower() == 'true',
+    },
+    'metrics_datasource': os.getenv('METRICS_DATASOURCE', 'prometheus'),
     'elasticsearch': {
         'url': os.getenv('ELASTICSEARCH_URL', 'http://elasticsearch:9200'),
         'index': os.getenv('ELASTICSEARCH_INDEX', 'logs-*'),

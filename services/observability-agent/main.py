@@ -22,6 +22,7 @@ class MetricsQueryRequest(BaseModel):
     query: str = Field(default='up', max_length=1000)
     incident_id: str | None = Field(default=None, max_length=120)
     time: str | None = Field(default=None, max_length=80)
+    datasource: str | None = Field(default=None, max_length=32)
 
 
 class ObservabilityAnalyzeRequest(BaseModel):
@@ -37,6 +38,11 @@ class PrometheusConfig(BaseModel):
     url: str = Field(default='http://prometheus:9090', max_length=500)
 
 
+class VictoriaMetricsConfig(BaseModel):
+    url: str = Field(default='http://victoriametrics:8428', max_length=500)
+    enabled: bool = Field(default=False)
+
+
 class ElasticsearchConfig(BaseModel):
     url: str = Field(default='http://elasticsearch:9200', max_length=500)
     index: str = Field(default='logs-*', max_length=160)
@@ -44,17 +50,32 @@ class ElasticsearchConfig(BaseModel):
 
 class ObservabilityConfig(BaseModel):
     prometheus: PrometheusConfig = Field(default_factory=PrometheusConfig)
+    victoriametrics: VictoriaMetricsConfig = Field(default_factory=VictoriaMetricsConfig)
+    metrics_datasource: str = Field(default='prometheus', max_length=32)
     elasticsearch: ElasticsearchConfig = Field(default_factory=ElasticsearchConfig)
 
 
 app = FastAPI(title='observability-agent', version='0.4.0')
 
 
-def _current_urls() -> tuple[str, str, str]:
+def _current_urls() -> tuple[str, str, str, str, bool, str]:
     config = load_config()
     prometheus_url = config.get('prometheus', {}).get('url', 'http://prometheus:9090')
+    vm_config = config.get('victoriametrics', {})
+    vm_url = vm_config.get('url', 'http://victoriametrics:8428')
+    vm_enabled = bool(vm_config.get('enabled', False))
+    metrics_datasource = str(config.get('metrics_datasource', 'prometheus')).lower()
     elasticsearch = config.get('elasticsearch', {})
-    return prometheus_url, elasticsearch.get('url', 'http://elasticsearch:9200'), elasticsearch.get('index', 'logs-*')
+    return prometheus_url, vm_url, metrics_datasource, elasticsearch.get('url', 'http://elasticsearch:9200'), vm_enabled, elasticsearch.get('index', 'logs-*')
+
+
+def _metrics_target(prometheus_url: str, vm_url: str, default_datasource: str, requested_datasource: str | None, vm_enabled: bool) -> tuple[str, str]:
+    source = (requested_datasource or default_datasource or 'prometheus').lower()
+    if source in {'victoria', 'victoriametrics', 'vm'}:
+        if vm_enabled:
+            return 'victoriametrics', vm_url
+        return 'prometheus', prometheus_url
+    return 'prometheus', prometheus_url
 
 
 def _safe_json(value: Any, limit: int = 16000) -> str:
@@ -71,16 +92,17 @@ def _default_promql(service: str | None) -> str:
 
 
 async def _collect_observability(payload: ObservabilityAnalyzeRequest) -> dict[str, Any]:
-    prometheus_url, elasticsearch_url, index = _current_urls()
+    prometheus_url, vm_url, metrics_datasource, elasticsearch_url, vm_enabled, index = _current_urls()
     service = payload.service or 'unknown'
     promql = payload.promql or _default_promql(service)
     metrics: dict[str, Any]
     logs: dict[str, Any]
     try:
-        metrics_data = await query_prometheus(promql, prometheus_url=prometheus_url)
-        metrics = {'status': 'ok', 'prometheus_url': prometheus_url, 'query': promql, 'data': metrics_data.get('data', {})}
+        source, base_url = _metrics_target(prometheus_url, vm_url, metrics_datasource, None, vm_enabled)
+        metrics_data = await query_prometheus(promql, prometheus_url=base_url)
+        metrics = {'status': 'ok', 'source': source, 'metrics_url': base_url, 'query': promql, 'data': metrics_data.get('data', {})}
     except httpx.HTTPError as exc:
-        metrics = {'status': 'error', 'prometheus_url': prometheus_url, 'query': promql, 'error': str(exc), 'data': {}}
+        metrics = {'status': 'error', 'query': promql, 'error': str(exc), 'data': {}}
     try:
         logs = await search_error_logs(service if service != 'unknown' else '', minutes=payload.minutes, index=index, elasticsearch_url=elasticsearch_url)
         logs['elasticsearch_url'] = elasticsearch_url
@@ -91,12 +113,15 @@ async def _collect_observability(payload: ObservabilityAnalyzeRequest) -> dict[s
 
 @app.get('/health')
 async def health() -> dict[str, Any]:
-    prometheus_url, elasticsearch_url, elasticsearch_index = _current_urls()
+    prometheus_url, vm_url, metrics_datasource, elasticsearch_url, vm_enabled, elasticsearch_index = _current_urls()
     return {
         'status': 'ok',
         'service': 'observability-agent',
         'llm_enabled': True,
         'prometheus_url': prometheus_url,
+        'victoriametrics_url': vm_url,
+        'victoriametrics_enabled': vm_enabled,
+        'metrics_datasource': metrics_datasource,
         'elasticsearch_url': elasticsearch_url,
         'elasticsearch_index': elasticsearch_index,
         'timestamp': datetime.now(timezone.utc).isoformat(),
@@ -115,7 +140,7 @@ async def put_config(payload: ObservabilityConfig) -> dict[str, Any]:
 
 @app.post('/api/v1/test/prometheus')
 async def test_prometheus() -> dict[str, Any]:
-    prometheus_url, _, _ = _current_urls()
+    prometheus_url, _, _, _, _, _ = _current_urls()
     try:
         data = await query_prometheus('up', prometheus_url=prometheus_url)
         return {'ok': True, 'prometheus_url': prometheus_url, 'data': data.get('data', {})}
@@ -123,9 +148,21 @@ async def test_prometheus() -> dict[str, Any]:
         return {'ok': False, 'prometheus_url': prometheus_url, 'error': str(exc)}
 
 
+@app.post('/api/v1/test/victoriametrics')
+async def test_victoriametrics() -> dict[str, Any]:
+    _, vm_url, _, _, vm_enabled, _ = _current_urls()
+    if not vm_enabled:
+        return {'ok': False, 'victoriametrics_url': vm_url, 'error': 'VictoriaMetrics is disabled in observability config.'}
+    try:
+        data = await query_prometheus('up', prometheus_url=vm_url)
+        return {'ok': True, 'victoriametrics_url': vm_url, 'data': data.get('data', {})}
+    except httpx.HTTPError as exc:
+        return {'ok': False, 'victoriametrics_url': vm_url, 'error': str(exc)}
+
+
 @app.post('/api/v1/test/elasticsearch')
 async def test_elasticsearch() -> dict[str, Any]:
-    _, elasticsearch_url, index = _current_urls()
+    _, _, _, elasticsearch_url, _, index = _current_urls()
     try:
         data = await search_error_logs('', minutes=5, index=index, elasticsearch_url=elasticsearch_url)
         return {'ok': True, 'elasticsearch_url': elasticsearch_url, 'index': index, 'entries': data.get('entries', [])}
@@ -172,15 +209,16 @@ async def query_observability(payload: QueryRequest) -> dict[str, Any]:
 
 @app.post('/api/v1/metrics/query')
 async def metrics_query(payload: MetricsQueryRequest) -> dict[str, Any]:
-    prometheus_url, _, _ = _current_urls()
+    prometheus_url, vm_url, metrics_datasource, _, vm_enabled, _ = _current_urls()
+    source, base_url = _metrics_target(prometheus_url, vm_url, metrics_datasource, payload.datasource, vm_enabled)
     try:
-        data = await query_prometheus(payload.query, payload.time, prometheus_url=prometheus_url)
+        data = await query_prometheus(payload.query, payload.time, prometheus_url=base_url)
     except httpx.HTTPError as exc:
-        return {'status': 'error', 'source': 'prometheus', 'prometheus_url': prometheus_url, 'error': str(exc), 'data': {}}
+        return {'status': 'error', 'source': source, 'metrics_url': base_url, 'error': str(exc), 'data': {}}
     return {
         'status': 'ok',
-        'source': 'prometheus',
-        'prometheus_url': prometheus_url,
+        'source': source,
+        'metrics_url': base_url,
         'incident_id': payload.incident_id,
         'query': payload.query,
         'data': data.get('data', {}),
@@ -192,7 +230,7 @@ async def logs_errors(
     service: str = Query(default='', max_length=160),
     minutes: int = Query(default=60, ge=1, le=1440),
 ) -> dict[str, Any]:
-    _, elasticsearch_url, index = _current_urls()
+    _, _, _, elasticsearch_url, _, index = _current_urls()
     try:
         return await search_error_logs(service, minutes=minutes, index=index, elasticsearch_url=elasticsearch_url)
     except httpx.HTTPError as exc:

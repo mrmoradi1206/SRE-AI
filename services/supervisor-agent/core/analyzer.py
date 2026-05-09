@@ -95,3 +95,7 @@ class AnalysisService:
             },
         )
         return decision | {'event_id': str(supervisor_event.event_id)}
+
+    async def answer_operator_question(self, incident_bundle: dict, question: str) -> dict:
+        settings = get_agent_llm_config('supervisor')
+        return await self.advisor.answer_question(incident_bundle, question, settings)

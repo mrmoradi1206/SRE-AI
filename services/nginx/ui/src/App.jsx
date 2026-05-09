@@ -30,6 +30,7 @@ const SAMPLE_ALERT = {
 };
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', hint: 'Cortex overview' },
+  { to: '/war-room', label: 'War Room', hint: 'Supervisor chat board' },
   { to: '/how-it-works', label: 'How It Works', hint: 'Cortex flow map' },
   { to: '/incidents', label: 'Incidents', hint: 'Triage queue' },
   { to: '/workflow', label: 'Test Workflow', hint: 'End-to-end drill' },
@@ -1078,6 +1079,126 @@ function CortexCommandPanel({ workflowSummary, trace, report }) {
   );
 }
 
+function SupervisorChatPanel({ incidentId, incident, busy, onBusyChange, onError, onAfterChat }) {
+  const [question, setQuestion] = useState('');
+  const [localMessages, setLocalMessages] = useState([]);
+
+  const persistedMessages = useMemo(() => {
+    const timeline = incident?.timeline || [];
+    const chatEvents = timeline
+      .filter((event) => event.event_type === 'supervisor.chat_answered')
+      .map((event) => {
+        const payload = safeJson(event.payload) || {};
+        return {
+          id: `${event.event_id}-q`,
+          role: 'user',
+          content: payload.question || 'Question not available',
+          at: event.created_at,
+        };
+      });
+    const replies = timeline
+      .filter((event) => event.event_type === 'supervisor.chat_answered')
+      .map((event) => {
+        const payload = safeJson(event.payload) || {};
+        return {
+          id: `${event.event_id}-a`,
+          role: 'assistant',
+          content: payload.answer || 'No answer text was stored.',
+          confidence: payload.confidence || 'unknown',
+          next_actions: payload.next_actions || [],
+          agent_summary: payload.agent_summary || {},
+          at: event.created_at,
+        };
+      });
+    const merged = [...chatEvents, ...replies].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+    return merged;
+  }, [incident?.timeline]);
+
+  const messages = [...persistedMessages, ...localMessages].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+
+  const submit = async () => {
+    if (!question.trim()) return;
+    const userText = question.trim();
+    const userMessage = { id: `local-user-${Date.now()}`, role: 'user', content: userText, at: new Date().toISOString() };
+    setLocalMessages((current) => [...current, userMessage]);
+    setQuestion('');
+    onBusyChange(true);
+    onError('');
+    try {
+      const result = await apiFetch(`/supervisor/incidents/${incidentId}/chat`, {
+        method: 'POST',
+        body: JSON.stringify({ question: userText }),
+      });
+      setLocalMessages((current) => [
+        ...current.filter((message) => message.id !== userMessage.id),
+        {
+          id: `local-assistant-${Date.now()}`,
+          role: 'assistant',
+          content: result.answer,
+          confidence: result.confidence,
+          next_actions: result.next_actions || [],
+          agent_summary: result.agent_summary || {},
+          at: new Date().toISOString(),
+        },
+      ]);
+      await onAfterChat();
+      setLocalMessages([]);
+    } catch (err) {
+      setLocalMessages((current) => current.filter((message) => message.id !== userMessage.id));
+      onError(err.message);
+    } finally {
+      onBusyChange(false);
+    }
+  };
+
+  return (
+    <div className="panel span-2">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">Operator chat</p>
+          <h3>Supervisor War Room</h3>
+        </div>
+        <span className="count-pill">{messages.length} messages</span>
+      </div>
+      <p className="muted-text">Chat live with Supervisor. Every question triggers evidence gathering from observability and repo agents before answer generation.</p>
+      <div className="chat-room">
+        {!messages.length ? <EmptyState title="War room is empty" copy="Start chatting to make Supervisor orchestrate the other agents for this incident." /> : null}
+        <div className="chat-thread">
+          {messages.map((item) => (
+            <article key={item.id} className={item.role === 'assistant' ? 'chat-bubble assistant' : 'chat-bubble user'}>
+              <div className="chat-meta">
+                <strong>{item.role === 'assistant' ? 'Cortex Supervisor' : 'You'}</strong>
+                <span>{formatDate(item.at)}</span>
+              </div>
+              <p>{item.content}</p>
+              {item.role === 'assistant' ? (
+                <div className="chat-response-details">
+                  <div className="incident-meta">
+                    <StatusChip status={item.confidence || 'unknown'} />
+                  </div>
+                  {!!item.next_actions?.length && <JsonBlock title="Action plan" data={item.next_actions} />}
+                  <JsonBlock title="What each agent did" data={item.agent_summary || {}} />
+                </div>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      </div>
+      <div className="chat-composer">
+        <textarea
+          value={question}
+          onChange={(event) => setQuestion(event.target.value)}
+          placeholder="Ask Supervisor anything about this incident, mitigation steps, and your proposed actions..."
+          rows="3"
+        />
+        <button type="button" disabled={busy || question.trim().length < 3} onClick={submit}>
+          {busy ? 'Investigating...' : 'Send to Supervisor'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function IncidentDetailPage() {
   const { incidentId } = useParams();
   const navigate = useNavigate();
@@ -1247,6 +1368,15 @@ function IncidentDetailPage() {
 
       <CortexCommandPanel workflowSummary={workflowSummary} trace={reactTrace} report={report} />
 
+      <SupervisorChatPanel
+        incidentId={incident.id}
+        incident={incident}
+        busy={busy}
+        onBusyChange={setBusy}
+        onError={setError}
+        onAfterChat={load}
+      />
+
       <ReActTracePanel trace={reactTrace} loading={traceLoading} />
 
       <SimilarIncidentsPanel similar={similarIncidents} />
@@ -1339,6 +1469,161 @@ function IncidentDetailPage() {
           </div>
         ) : (
           <p>No agent activity summary is available yet.</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function WarRoomPage() {
+  const [messages, setMessages] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem('cortex-war-room-messages');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [question, setQuestion] = useState('');
+  const [logs, setLogs] = useState([]);
+  const [incidentsInScope, setIncidentsInScope] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [logsBusy, setLogsBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const loadLogs = async () => {
+    setLogsBusy(true);
+    try {
+      const result = await apiFetch('/supervisor/war-room/logs?limit_incidents=12&per_incident_events=30');
+      setLogs(result.items || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLogsBusy(false);
+    }
+  };
+
+  const sendQuestion = async () => {
+    if (!question.trim()) return;
+    const userText = question.trim();
+    setMessages((current) => [...current, { id: `u-${Date.now()}`, role: 'user', content: userText, at: new Date().toISOString() }]);
+    setQuestion('');
+    setBusy(true);
+    setError('');
+    try {
+      const result = await apiFetch('/supervisor/war-room/chat', {
+        method: 'POST',
+        body: JSON.stringify({ question: userText, incident_limit: 10 }),
+      });
+      setIncidentsInScope(result.incidents || []);
+      setMessages((current) => [
+        ...current,
+        {
+          id: `a-${Date.now()}`,
+          role: 'assistant',
+          content: result.answer || 'No answer returned.',
+          confidence: result.confidence || 'unknown',
+          next_actions: result.next_actions || [],
+          agent_summary: result.agent_summary || {},
+          at: new Date().toISOString(),
+        },
+      ]);
+      await loadLogs();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    loadLogs();
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem('cortex-war-room-messages', JSON.stringify(messages.slice(-60)));
+  }, [messages]);
+
+  useEffect(() => {
+    const timer = window.setInterval(loadLogs, 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <section className="page-grid detail-grid">
+      <div className="panel span-2">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Cortex board</p>
+            <h3>Global Supervisor War Room</h3>
+          </div>
+          <span className="count-pill">{incidentsInScope.length} incidents in scope</span>
+        </div>
+        <p className="muted-text">No incident picker. Ask once, and Supervisor reasons across all active incidents and gathers evidence from specialist agents.</p>
+        <div className="chat-room">
+          {!messages.length ? <EmptyState title="War room is empty" copy="Ask a global incident question to start multi-incident investigation." /> : null}
+          <div className="chat-thread">
+            {messages.map((item) => (
+              <article key={item.id} className={item.role === 'assistant' ? 'chat-bubble assistant' : 'chat-bubble user'}>
+                <div className="chat-meta">
+                  <strong>{item.role === 'assistant' ? 'Cortex Supervisor' : 'You'}</strong>
+                  <span>{formatDate(item.at)}</span>
+                </div>
+                <p>{item.content}</p>
+                {item.role === 'assistant' ? (
+                  <div className="chat-response-details">
+                    <div className="incident-meta">
+                      <StatusChip status={item.confidence || 'unknown'} />
+                    </div>
+                    {!!item.next_actions?.length && <JsonBlock title="Action plan" data={item.next_actions} />}
+                    <JsonBlock title="What each agent did" data={item.agent_summary || {}} />
+                  </div>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </div>
+        <div className="chat-composer">
+          <textarea
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="Example: We have too many alerts now. Which incidents should we mitigate first and why?"
+            rows="3"
+          />
+          <div className="action-row wrap">
+            <button type="button" disabled={busy || question.trim().length < 3} onClick={sendQuestion}>
+              {busy ? 'Investigating...' : 'Send to Supervisor'}
+            </button>
+            <button type="button" className="ghost-button" disabled={busy} onClick={loadLogs}>Refresh agent logs</button>
+            <button type="button" className="ghost-button" disabled={busy} onClick={() => setMessages([])}>Clear chat</button>
+          </div>
+        </div>
+        {error ? <p className="error-text">{error}</p> : null}
+      </div>
+      <div className="panel span-2">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Agent activity</p>
+            <h3>All action logs</h3>
+          </div>
+          <span className="count-pill">{logsBusy ? 'refreshing' : `${logs.length} logs`}</span>
+        </div>
+        {!logs.length ? (
+          <EmptyState title="No action logs yet" copy="Logs will appear here from history, supervisor, observability, repo, and report actions." />
+        ) : (
+          <div className="stack-list">
+            {logs.map((log) => (
+              <article key={log.event_id} className="stack-item">
+                <div className="incident-meta">
+                  <span>{log.actor || 'system'}</span>
+                  <span>{log.event_type}</span>
+                </div>
+                <strong>{log.incident_summary || log.incident_id}</strong>
+                <p>{formatDate(log.created_at)}</p>
+                <JsonBlock title="Action detail" data={log.details || {}} />
+              </article>
+            ))}
+          </div>
         )}
       </div>
     </section>
@@ -1679,7 +1964,7 @@ function PlatformIntegrationSettings() {
     try {
       const next = await apiFetch('/observability/api/v1/config', { method: 'PUT', body: JSON.stringify(observability) });
       setObservability(next);
-      setMessage('Prometheus and Elasticsearch settings saved. New agent tool calls use these values immediately.');
+      setMessage('Prometheus/VictoriaMetrics and Elasticsearch settings saved. New agent tool calls use these values immediately.');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -1713,6 +1998,8 @@ function PlatformIntegrationSettings() {
     try {
       const path = target === 'prometheus'
         ? '/observability/api/v1/test/prometheus'
+        : target === 'victoriametrics'
+          ? '/observability/api/v1/test/victoriametrics'
         : target === 'elasticsearch'
           ? '/observability/api/v1/test/elasticsearch'
           : '/repo/api/v1/test/gitlab';
@@ -1745,7 +2032,7 @@ function PlatformIntegrationSettings() {
       <div className="panel-header">
         <div>
           <p className="eyebrow">Data integrations</p>
-          <h3>Connect Prometheus, Elasticsearch, and GitLab</h3>
+          <h3>Connect Prometheus, VictoriaMetrics, Elasticsearch, and GitLab</h3>
         </div>
         <button type="button" className="ghost-button" disabled={Boolean(busy)} onClick={load}>Reload</button>
       </div>
@@ -1755,6 +2042,27 @@ function PlatformIntegrationSettings() {
           Prometheus URL
           <span className="field-hint">Example: http://prometheus:9090 or http://10.0.0.5:9090</span>
           <input value={observability.prometheus?.url || ''} onChange={(event) => updateObservability('prometheus', { url: event.target.value })} />
+        </label>
+        <label>
+          VictoriaMetrics URL
+          <span className="field-hint">Example: http://victoriametrics:8428 or http://vmselect:8481/select/0/prometheus</span>
+          <input value={observability.victoriametrics?.url || ''} onChange={(event) => updateObservability('victoriametrics', { url: event.target.value })} />
+        </label>
+        <label>
+          Metrics datasource
+          <span className="field-hint">Default backend for PromQL queries used by observability-agent.</span>
+          <select value={observability.metrics_datasource || 'prometheus'} onChange={(event) => setObservability((current) => ({ ...current, metrics_datasource: event.target.value }))}>
+            <option value="prometheus">Prometheus</option>
+            <option value="victoriametrics">VictoriaMetrics</option>
+          </select>
+        </label>
+        <label>
+          VictoriaMetrics mode
+          <span className="field-hint">Enable before selecting VictoriaMetrics datasource.</span>
+          <select value={observability.victoriametrics?.enabled ? 'true' : 'false'} onChange={(event) => updateObservability('victoriametrics', { enabled: event.target.value === 'true' })}>
+            <option value="false">Disabled</option>
+            <option value="true">Enabled</option>
+          </select>
         </label>
         <label>
           Elasticsearch URL
@@ -1770,6 +2078,7 @@ function PlatformIntegrationSettings() {
       <div className="action-row wrap">
         <button type="button" disabled={Boolean(busy)} onClick={saveObservability}>{busy === 'save-observability' ? 'Saving...' : 'Save Observability'}</button>
         <button type="button" className="ghost-button" disabled={Boolean(busy)} onClick={() => runTest('prometheus')}>{busy === 'test-prometheus' ? 'Testing...' : 'Test Prometheus'}</button>
+        <button type="button" className="ghost-button" disabled={Boolean(busy)} onClick={() => runTest('victoriametrics')}>{busy === 'test-victoriametrics' ? 'Testing...' : 'Test VictoriaMetrics'}</button>
         <button type="button" className="ghost-button" disabled={Boolean(busy)} onClick={() => runTest('elasticsearch')}>{busy === 'test-elasticsearch' ? 'Testing...' : 'Test Elasticsearch'}</button>
       </div>
 
@@ -2529,6 +2838,7 @@ export default function App() {
     <Shell>
       <Routes>
         <Route path="/" element={<DashboardPage />} />
+        <Route path="/war-room" element={<WarRoomPage />} />
         <Route path="/how-it-works" element={<HowItWorksPage />} />
         <Route path="/workflow" element={<WorkflowTestPage />} />
         <Route path="/integrations" element={<IntegrationPage />} />

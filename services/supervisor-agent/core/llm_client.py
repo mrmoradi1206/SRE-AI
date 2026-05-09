@@ -254,6 +254,123 @@ class SupervisorAdvisor:
                 raise
             return json.loads(match.group(0))
 
+    def _summarize_observation(self, observation: dict[str, Any]) -> str:
+        if not isinstance(observation, dict):
+            return 'No observation captured.'
+        if observation.get('source') == 'observability-agent':
+            agent_response = observation.get('agent_response', {})
+            return str(agent_response.get('analysis') or observation.get('summary') or 'Collected metrics and logs evidence.')
+        if observation.get('source') == 'repo-agent':
+            return str(observation.get('analysis') or observation.get('summary') or 'Collected repository change evidence.')
+        if observation.get('error'):
+            return f"Tool call failed ({observation.get('error')})."
+        return str(observation.get('summary') or 'Observation recorded.')
+
+    async def answer_question(self, incident_bundle: dict, question: str, settings: dict[str, Any]) -> dict[str, Any]:
+        incident_id = self._incident_id(incident_bundle)
+        bundle = _sanitize_bundle(normalize_incident_bundle(incident_bundle))
+        memory_history = await self.memory.get_history(incident_id)
+        react_trace: list[dict[str, Any]] = []
+        observations: list[dict[str, Any]] = []
+
+        for specialist_action in (
+            {'name': 'query_observability', 'input': {'focus': question}},
+            {'name': 'query_repo_changes', 'input': {'focus': question}},
+        ):
+            observation = await self._run_action(incident_bundle, specialist_action)
+            observations.append(observation)
+            step = {
+                'kind': 'chat',
+                'iteration': len(react_trace) + 1,
+                'thought': f"Gather evidence from {specialist_action['name']} before answering operator question.",
+                'action': specialist_action,
+                'observation': observation,
+            }
+            react_trace.append(step)
+            await self.memory.append(incident_id, step)
+
+        try:
+            response = await run_llm(
+                settings['provider'],
+                settings['model'],
+                [
+                    {'role': 'system', 'content': get_agent_system_prompt('supervisor')},
+                    {
+                        'role': 'user',
+                        'content': json.dumps(
+                            {
+                                'task': 'You are Cortex Supervisor. Answer the operator question using specialist agent evidence.',
+                                'question': question,
+                                'incident': bundle.get('incident', {}),
+                                'alerts': bundle.get('alerts', []),
+                                'timeline': bundle.get('timeline', [])[-20:],
+                                'memory_history': memory_history,
+                                'specialist_observations': observations,
+                                'format': {
+                                    'answer': 'short markdown answer for operator',
+                                    'confidence': 'low|medium|high',
+                                    'next_actions': ['string'],
+                                },
+                                'rules': [
+                                    'Do not invent evidence.',
+                                    'Reference observability-agent and repo-agent findings explicitly.',
+                                    'Return JSON only.',
+                                ],
+                            },
+                            default=str,
+                        ),
+                    },
+                ],
+                temperature=0.1,
+                max_tokens=800,
+            )
+            parsed = self._parse_react_step(response['content'])
+            answer = str(parsed.get('answer') or 'I could not produce a confident answer yet.')
+            confidence = str(parsed.get('confidence') or 'medium').lower()
+            next_actions = parsed.get('next_actions') if isinstance(parsed.get('next_actions'), list) else []
+            llm_trace = response.get('trace')
+            provider = response.get('provider')
+            model = response.get('model')
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('supervisor_chat_llm_fallback_used', extra={'provider': settings.get('provider'), 'model': settings.get('model'), 'error_type': type(exc).__name__})
+            answer = (
+                'Supervisor collected evidence from observability and repository agents, but final LLM synthesis is unavailable. '
+                'Review the per-agent summary below and execute the listed next actions.'
+            )
+            confidence = 'low'
+            next_actions = [
+                'Confirm LLM provider credentials/billing and retry chat.',
+                'Use observability and repo evidence panels to continue triage.',
+            ]
+            llm_trace = {'status': 'fallback', 'error': type(exc).__name__, 'provider': settings.get('provider'), 'model': settings.get('model')}
+            provider = settings.get('provider')
+            model = settings.get('model')
+        agent_summary = {
+            'supervisor-agent': 'Synthesized observability and repository evidence into an operator-facing answer.',
+            'observability-agent': self._summarize_observation(observations[0]) if observations else 'No observability call.',
+            'repo-agent': self._summarize_observation(observations[1]) if len(observations) > 1 else 'No repo call.',
+            'history-agent': 'Provided incident, alert, and timeline context used by Supervisor.',
+        }
+        final_step = {
+            'kind': 'chat',
+            'iteration': len(react_trace) + 1,
+            'thought': 'Provide final operator response from collected evidence.',
+            'final': {'answer': answer, 'confidence': confidence, 'next_actions': next_actions},
+        }
+        react_trace.append(final_step)
+        await self.memory.append(incident_id, final_step)
+        return {
+            'incident_id': incident_id,
+            'answer': answer,
+            'confidence': confidence,
+            'next_actions': next_actions,
+            'agent_summary': agent_summary,
+            'trace': react_trace,
+            'llm_trace': llm_trace,
+            'provider': provider,
+            'model': model,
+        }
+
     async def build_decision(self, incident_bundle: dict, settings: dict, reasoning_mode: str = 'balanced') -> dict:
         fallback = self.build_fallback_decision(incident_bundle, settings, reasoning_mode=reasoning_mode)
         incident_id = self._incident_id(incident_bundle)

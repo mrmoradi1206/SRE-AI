@@ -191,6 +191,8 @@ This is the main SRE workbench for one incident.
 - **Approve & Learn** opens a modal to review/edit root cause and resolution, then saves the approved knowledge into pgvector long-term memory.
 - **Delete Incident** removes the current incident and related records.
 - **Back** returns to the Incidents queue.
+- **Talk to Cortex Supervisor** opens an operator chat lane on the incident page; each question triggers a fresh supervisor investigation pass that asks observability-agent and repo-agent before answering.
+- **What each agent did** appears under every chat reply so operators can quickly review supervisor, history, observability, and repo contributions.
 - **Cortex command log** shows the supervisor-first flow: Supervisor as commander, Observability and Repo evidence returned to Supervisor, History events, Report actions, and channel delivery records.
 - **Supervisor final decision** shows the final structured decision from the latest ReAct trace when available.
 - Agent action rows can be expanded to inspect recommended actions, sanitized LLM traces, and raw event details.

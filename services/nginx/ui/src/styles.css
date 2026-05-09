@@ -1263,6 +1263,12 @@ textarea:focus {
   color: var(--ink);
 }
 
+:root[data-theme="dark"] .chat-room,
+:root[data-theme="dark"] .chat-bubble.assistant {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+}
+
 .health-grid,
 .prompt-grid,
 .secret-grid {
@@ -1384,6 +1390,75 @@ textarea:focus {
 .cot-observation {
   display: grid;
   gap: 0.5rem;
+}
+
+.chat-room {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.45);
+  padding: 0.9rem;
+}
+
+.chat-thread {
+  max-height: 520px;
+  overflow: auto;
+  display: grid;
+  gap: 0.9rem;
+  padding-right: 0.35rem;
+}
+
+.chat-bubble {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  max-width: min(92%, 880px);
+}
+
+.chat-bubble.user {
+  justify-self: end;
+  background: linear-gradient(140deg, #103430, #17423c);
+  color: #eef9f2;
+  border-color: rgba(111, 228, 175, 0.22);
+}
+
+.chat-bubble.assistant {
+  justify-self: start;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.chat-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.chat-bubble.user .chat-meta {
+  color: rgba(235, 247, 240, 0.82);
+}
+
+.chat-bubble p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.chat-response-details {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.chat-composer {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.chat-composer textarea {
+  resize: vertical;
+  min-height: 88px;
 }
 
 .integration-grid {

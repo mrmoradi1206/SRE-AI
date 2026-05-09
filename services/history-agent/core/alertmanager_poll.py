@@ -62,7 +62,13 @@ def _alert_grouping_key(alert: dict[str, Any]) -> str:
 
 
 def _to_alert_in(alert: dict[str, Any]) -> AlertIn:
-    status = (alert.get('status') or 'firing').lower()
+    raw_status = alert.get('status')
+    if isinstance(raw_status, dict):
+        status = str(raw_status.get('state') or raw_status.get('status') or 'firing').lower()
+    elif isinstance(raw_status, str):
+        status = raw_status.lower()
+    else:
+        status = 'firing'
     labels = alert.get('labels') or {}
     return AlertIn(
         event_key=_alert_event_key(alert),
