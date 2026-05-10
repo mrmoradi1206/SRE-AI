@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import asyncio
 import json
 import os
 import time
@@ -27,7 +28,7 @@ from aiops_shared.projector import apply_event_to_projection
 from aiops_shared.queue import enqueue_job
 
 from core.analyzer import AnalysisService
-from core.memory import ReActMemory
+from core.memory import ReActMemory, WarRoomMemory
 from core.rag import IncidentRAG
 from core.config import (
     HISTORY_AGENT_URL,
@@ -44,7 +45,9 @@ router = APIRouter(prefix='/supervisor')
 plain_router = APIRouter()
 service = AnalysisService()
 react_memory = ReActMemory()
+_war_room_memory = WarRoomMemory()
 incident_rag = IncidentRAG()
+ACTIVE_STATUSES = {'open', 'investigating', 'mitigating'}
 
 
 class IncidentApproveIn(BaseModel):
@@ -61,6 +64,7 @@ class SupervisorChatIn(BaseModel):
 
 class WarRoomChatIn(BaseModel):
     question: str = Field(min_length=3, max_length=2000)
+    session_id: str | None = Field(default=None)
     incident_limit: int = Field(default=8, ge=1, le=20)
 
 http_client = AsyncServiceClient(
@@ -588,28 +592,37 @@ def _event_as_log(event: dict, incident_id: str, incident_summary: str | None = 
 
 @plain_router.post('/api/v1/war-room/chat')
 async def war_room_chat_v1(payload: WarRoomChatIn) -> dict:
+    session_id = payload.session_id or str(uuid4())
+
     incidents_response = await http_client.get(
         f'{HISTORY_AGENT_URL}/incidents',
-        params={'page': 1, 'page_size': payload.incident_limit},
+        params={'page': 1, 'page_size': 30},
     )
-    items = incidents_response.json().get('items', [])
-    bundles: list[dict] = []
-    for item in items:
+    all_items = incidents_response.json().get('items', [])
+    active_items = [
+        item for item in all_items
+        if str(item.get('status', '')).lower() in ACTIVE_STATUSES
+    ][:payload.incident_limit]
+
+    async def fetch_bundle(item):
         incident_id = item.get('id')
         if not incident_id:
-            continue
-        detail = await http_client.get(f'{HISTORY_AGENT_URL}/incidents/{incident_id}')
-        bundles.append(normalize_incident_bundle(detail.json()))
+            return None
+        try:
+            detail = await http_client.get(f'{HISTORY_AGENT_URL}/incidents/{incident_id}')
+            return normalize_incident_bundle(detail.json())
+        except Exception:
+            return None
+
+    bundles = [bundle for bundle in await asyncio.gather(*[fetch_bundle(item) for item in active_items]) if bundle]
 
     aggregated_timeline: list[dict] = []
     aggregated_alerts: list[dict] = []
     summaries: list[dict] = []
     for bundle in bundles:
         incident = bundle.get('incident', {})
-        timeline = bundle.get('timeline', [])[:10]
-        alerts = bundle.get('alerts', [])[:5]
-        aggregated_timeline.extend(timeline)
-        aggregated_alerts.extend(alerts)
+        aggregated_timeline.extend(bundle.get('timeline', [])[:10])
+        aggregated_alerts.extend(bundle.get('alerts', [])[:5])
         summaries.append(
             {
                 'id': incident.get('id'),
@@ -619,21 +632,54 @@ async def war_room_chat_v1(payload: WarRoomChatIn) -> dict:
                 'last_seen_at': incident.get('last_seen_at'),
             }
         )
+
+    session_history = await _war_room_memory.get_history(session_id, limit=20)
     war_bundle = {
         'incident': {
-            'id': 'war-room',
-            'summary': f'Global war room context across {len(summaries)} incidents',
+            'id': f'war-room:{session_id}',
+            'summary': f'War room: {len(summaries)} active incidents under investigation',
             'severity': 'mixed',
             'status': 'investigating',
         },
         'alerts': aggregated_alerts[:50],
         'timeline': aggregated_timeline[:120],
         'similar_incidents': [],
+        'war_room_session_history': session_history,
     }
+
     chat_result = await service.answer_operator_question(war_bundle, payload.question)
+    await _war_room_memory.append(session_id, 'user', payload.question)
+    await _war_room_memory.append(
+        session_id,
+        'assistant',
+        chat_result.get('answer', ''),
+        {
+            'confidence': chat_result.get('confidence'),
+            'tool_calls': _extract_tool_calls(chat_result.get('trace', [])),
+        },
+    )
+
     chat_result['incidents'] = summaries
-    chat_result['scope'] = 'global'
+    chat_result['session_id'] = session_id
+    chat_result['scope'] = 'active_only'
+    chat_result['tool_calls'] = _extract_tool_calls(chat_result.get('trace', []))
     return chat_result
+
+
+def _extract_tool_calls(trace: list) -> list[dict]:
+    calls = []
+    for step in trace:
+        if isinstance(step, dict) and step.get('action'):
+            action = step['action']
+            obs = step.get('observation', {})
+            calls.append(
+                {
+                    'tool': action.get('name', 'unknown'),
+                    'summary': obs.get('summary', '') if isinstance(obs, dict) else str(obs),
+                    'status': 'error' if (isinstance(obs, dict) and obs.get('error')) else 'ok',
+                }
+            )
+    return calls
 
 
 @plain_router.get('/api/v1/war-room/logs')

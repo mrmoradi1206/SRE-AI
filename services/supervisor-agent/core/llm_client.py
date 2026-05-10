@@ -306,6 +306,7 @@ class SupervisorAdvisor:
                         'available_tools': get_registry_for_prompt(),
                         'observations_so_far': observations,
                         'question': question,
+                        'conversation_history': incident_bundle.get('war_room_session_history', []),
                         'incident': bundle.get('incident', {}),
                         'alerts': bundle.get('alerts', []),
                         'timeline': bundle.get('timeline', [])[-20:],
@@ -318,6 +319,7 @@ class SupervisorAdvisor:
                         },
                         'rules': [
                             'You are Cortex Supervisor. You are autonomous. Choose tools only when needed.',
+                            'If conversation_history is present, use it to maintain context across questions.',
                             'If you already have enough context, skip tools and return final immediately.',
                             'Use at most one tool per iteration.',
                             'Return JSON only.',

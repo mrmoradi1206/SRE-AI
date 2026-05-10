@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
@@ -1476,157 +1476,225 @@ function IncidentDetailPage() {
 }
 
 function WarRoomPage() {
-  const [messages, setMessages] = useState(() => {
-    try {
-      const raw = window.localStorage.getItem('cortex-war-room-messages');
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [sessionId, setSessionId] = useState(() => window.sessionStorage.getItem('cortex-war-room-session') || null);
+  const [messages, setMessages] = useState([]);
   const [question, setQuestion] = useState('');
+  const [incidents, setIncidents] = useState([]);
   const [logs, setLogs] = useState([]);
-  const [incidentsInScope, setIncidentsInScope] = useState([]);
   const [busy, setBusy] = useState(false);
-  const [logsBusy, setLogsBusy] = useState(false);
   const [error, setError] = useState('');
+  const [showLogs, setShowLogs] = useState(false);
+  const [showIncidents, setShowIncidents] = useState(false);
+  const threadRef = useRef(null);
+
+  useEffect(() => {
+    if (threadRef.current) {
+      threadRef.current.scrollTop = threadRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    if (!showLogs) return undefined;
+    loadLogs();
+    const timer = window.setInterval(loadLogs, 8000);
+    return () => window.clearInterval(timer);
+  }, [showLogs]);
 
   const loadLogs = async () => {
-    setLogsBusy(true);
     try {
-      const result = await apiFetch('/supervisor/war-room/logs?limit_incidents=12&per_incident_events=30');
+      const result = await apiFetch('/supervisor/war-room/logs?limit_incidents=8&per_incident_events=20');
       setLogs(result.items || []);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLogsBusy(false);
+    } catch (_) {
+      // Agent logs are secondary to chat; keep the room usable if logs fail.
     }
   };
 
   const sendQuestion = async () => {
-    if (!question.trim()) return;
-    const userText = question.trim();
-    setMessages((current) => [...current, { id: `u-${Date.now()}`, role: 'user', content: userText, at: new Date().toISOString() }]);
+    const text = question.trim();
+    if (!text || busy) return;
     setQuestion('');
     setBusy(true);
     setError('');
+
+    const userMsg = { id: `u-${Date.now()}`, role: 'user', content: text };
+    const loadingId = `l-${Date.now()}`;
+    setMessages((prev) => [...prev, userMsg, { id: loadingId, role: 'loading', content: '' }]);
+
     try {
       const result = await apiFetch('/supervisor/war-room/chat', {
         method: 'POST',
-        body: JSON.stringify({ question: userText, incident_limit: 10 }),
+        body: JSON.stringify({
+          question: text,
+          session_id: sessionId,
+          incident_limit: 8,
+        }),
       });
-      setIncidentsInScope(result.incidents || []);
-      setMessages((current) => [
-        ...current,
-        {
-          id: `a-${Date.now()}`,
-          role: 'assistant',
-          content: result.answer || 'No answer returned.',
-          confidence: result.confidence || 'unknown',
-          next_actions: result.next_actions || [],
-          agent_summary: result.agent_summary || {},
-          at: new Date().toISOString(),
-        },
-      ]);
-      await loadLogs();
+
+      if (result.session_id) {
+        setSessionId(result.session_id);
+        window.sessionStorage.setItem('cortex-war-room-session', result.session_id);
+      }
+
+      setIncidents(result.incidents || []);
+      setMessages((prev) => prev.map((msg) => (msg.id === loadingId ? {
+        id: `a-${Date.now()}`,
+        role: 'assistant',
+        content: result.answer || 'No answer returned.',
+        confidence: result.confidence,
+        next_actions: result.next_actions || [],
+        tool_calls: result.tool_calls || [],
+      } : msg)));
     } catch (err) {
-      setError(err.message);
+      setMessages((prev) => prev.filter((msg) => msg.id !== loadingId));
+      setError('Could not reach Supervisor. Check your connection and try again.');
     } finally {
       setBusy(false);
     }
   };
 
-  useEffect(() => {
-    loadLogs();
-  }, []);
+  const handleKey = (event) => {
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) sendQuestion();
+  };
 
-  useEffect(() => {
-    window.localStorage.setItem('cortex-war-room-messages', JSON.stringify(messages.slice(-60)));
-  }, [messages]);
-
-  useEffect(() => {
-    const timer = window.setInterval(loadLogs, 5000);
-    return () => window.clearInterval(timer);
-  }, []);
+  const clearSession = () => {
+    setMessages([]);
+    setIncidents([]);
+    setSessionId(null);
+    window.sessionStorage.removeItem('cortex-war-room-session');
+  };
 
   return (
-    <section className="page-grid detail-grid">
-      <div className="panel span-2">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Cortex board</p>
-            <h3>Global Supervisor War Room</h3>
-          </div>
-          <span className="count-pill">{incidentsInScope.length} incidents in scope</span>
+    <section className="war-room-layout">
+      <div className="war-room-header">
+        <div>
+          <p className="eyebrow">Cortex</p>
+          <h3>War Room</h3>
         </div>
-        <p className="muted-text">No incident picker. Ask once, and Supervisor reasons across all active incidents and gathers evidence from specialist agents.</p>
-        <div className="chat-room">
-          {!messages.length ? <EmptyState title="War room is empty" copy="Ask a global incident question to start multi-incident investigation." /> : null}
-          <div className="chat-thread">
-            {messages.map((item) => (
-              <article key={item.id} className={item.role === 'assistant' ? 'chat-bubble assistant' : 'chat-bubble user'}>
-                <div className="chat-meta">
-                  <strong>{item.role === 'assistant' ? 'Cortex Supervisor' : 'You'}</strong>
-                  <span>{formatDate(item.at)}</span>
-                </div>
-                <p>{item.content}</p>
-                {item.role === 'assistant' ? (
-                  <div className="chat-response-details">
-                    <div className="incident-meta">
-                      <StatusChip status={item.confidence || 'unknown'} />
-                    </div>
-                    {!!item.next_actions?.length && <JsonBlock title="Action plan" data={item.next_actions} />}
-                    <JsonBlock title="What each agent did" data={item.agent_summary || {}} />
-                  </div>
-                ) : null}
-              </article>
+        <div className="war-room-header-actions">
+          <button type="button" className="ghost-button" onClick={() => setShowIncidents((value) => !value)}>
+            {incidents.length > 0 ? `${incidents.length} active` : 'No active incidents'}
+          </button>
+          <button type="button" className="ghost-button" onClick={() => setShowLogs((value) => !value)}>
+            {showLogs ? 'Hide logs' : 'Agent logs'}
+          </button>
+          <button type="button" className="ghost-button" onClick={clearSession}>
+            New session
+          </button>
+        </div>
+      </div>
+
+      {showIncidents && incidents.length > 0 && (
+        <div className="war-room-scope">
+          {incidents.map((incident) => (
+            <span key={incident.id} className={`status-chip status-${incident.status}`}>
+              {incident.summary || incident.id} - {incident.severity}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="war-room-body">
+        <div className="war-room-chat">
+          <div className="chat-thread" ref={threadRef}>
+            {!messages.length && (
+              <EmptyState
+                title="War room ready"
+                copy="Ask anything about active incidents. Supervisor will investigate using available agents."
+              />
+            )}
+            {messages.map((msg) => (
+              <WarRoomMessage key={msg.id} msg={msg} />
             ))}
           </div>
-        </div>
-        <div className="chat-composer">
-          <textarea
-            value={question}
-            onChange={(event) => setQuestion(event.target.value)}
-            placeholder="Example: We have too many alerts now. Which incidents should we mitigate first and why?"
-            rows="3"
-          />
-          <div className="action-row wrap">
-            <button type="button" disabled={busy || question.trim().length < 3} onClick={sendQuestion}>
-              {busy ? 'Investigating...' : 'Send to Supervisor'}
-            </button>
-            <button type="button" className="ghost-button" disabled={busy} onClick={loadLogs}>Refresh agent logs</button>
-            <button type="button" className="ghost-button" disabled={busy} onClick={() => setMessages([])}>Clear chat</button>
+
+          <div className="chat-composer">
+            {error && <p className="error-text">{error}</p>}
+            <textarea
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+              onKeyDown={handleKey}
+              placeholder="e.g. Which service is causing the most alerts right now?"
+              rows={3}
+              disabled={busy}
+            />
+            <div className="action-row">
+              <span className="muted-text" style={{ fontSize: '0.8rem' }}>
+                Ctrl+Enter to send
+              </span>
+              <button type="button" onClick={sendQuestion} disabled={busy || question.trim().length < 3}>
+                {busy ? 'Investigating...' : 'Ask Supervisor'}
+              </button>
+            </div>
           </div>
         </div>
-        {error ? <p className="error-text">{error}</p> : null}
-      </div>
-      <div className="panel span-2">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Agent activity</p>
-            <h3>All action logs</h3>
-          </div>
-          <span className="count-pill">{logsBusy ? 'refreshing' : `${logs.length} logs`}</span>
-        </div>
-        {!logs.length ? (
-          <EmptyState title="No action logs yet" copy="Logs will appear here from history, supervisor, observability, repo, and report actions." />
-        ) : (
-          <div className="stack-list">
-            {logs.map((log) => (
-              <article key={log.event_id} className="stack-item">
-                <div className="incident-meta">
-                  <span>{log.actor || 'system'}</span>
-                  <span>{log.event_type}</span>
-                </div>
-                <strong>{log.incident_summary || log.incident_id}</strong>
-                <p>{formatDate(log.created_at)}</p>
-                <JsonBlock title="Action detail" data={log.details || {}} />
-              </article>
+
+        {showLogs && (
+          <div className="war-room-logs">
+            <p className="eyebrow" style={{ padding: '0.75rem 1rem 0' }}>Agent activity</p>
+            {!logs.length ? (
+              <EmptyState title="No logs yet" copy="Logs appear after Supervisor runs." />
+            ) : logs.slice(0, 40).map((log, index) => (
+              <div key={log.event_id || `${log.incident_id}-${index}`} className="log-item">
+                <span className="log-actor">{log.actor}</span>
+                <span className="log-type">{log.event_type}</span>
+                <span className="log-time muted-text">{formatDate(log.created_at)}</span>
+              </div>
             ))}
           </div>
         )}
       </div>
     </section>
+  );
+}
+
+function WarRoomMessage({ msg }) {
+  if (msg.role === 'loading') {
+    return (
+      <div className="chat-bubble assistant">
+        <span className="muted-text">Supervisor is investigating...</span>
+      </div>
+    );
+  }
+  if (msg.role === 'user') {
+    return (
+      <article className="chat-bubble user">
+        <p>{msg.content}</p>
+      </article>
+    );
+  }
+  return (
+    <article className="chat-bubble assistant">
+      <div className="chat-meta">
+        <strong>Cortex Supervisor</strong>
+        {msg.confidence && <StatusChip status={msg.confidence} />}
+      </div>
+      <p style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+
+      {msg.tool_calls?.length > 0 && (
+        <details className="tool-calls-summary">
+          <summary>{msg.tool_calls.length} agent{msg.tool_calls.length > 1 ? 's' : ''} consulted</summary>
+          <div className="tool-calls-list">
+            {msg.tool_calls.map((toolCall, index) => (
+              <div key={`${toolCall.tool}-${index}`} className={`tool-call-item ${toolCall.status === 'error' ? 'tool-error' : ''}`}>
+                <span className="tool-name">{toolCall.tool}</span>
+                <span className="tool-summary">{toolCall.summary || '-'}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+
+      {msg.next_actions?.length > 0 && (
+        <div className="next-actions">
+          <p className="eyebrow">Recommended actions</p>
+          <ol>
+            {msg.next_actions.map((action, index) => (
+              <li key={index}>{typeof action === 'string' ? action : action.action}</li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </article>
   );
 }
 
