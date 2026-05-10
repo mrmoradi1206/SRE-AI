@@ -1,32 +1,37 @@
 from __future__ import annotations
 
-import hashlib
 import logging
-import math
+import threading
 from typing import Any
 from uuid import UUID
 
+from fastembed import TextEmbedding
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 EMBEDDING_DIMENSIONS = 384
+_model: TextEmbedding | None = None
+_model_lock = threading.Lock()
 
 
 def _embedding_text(*parts: Any) -> str:
     return ' | '.join(str(part or '') for part in parts if part is not None)[:12000]
 
 
+def _get_model() -> TextEmbedding:
+    global _model
+    if _model is None:
+        with _model_lock:
+            if _model is None:
+                _model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+    return _model
+
+
 def embed_text(value: str) -> list[float]:
-    vector = [0.0] * EMBEDDING_DIMENSIONS
-    tokens = value.lower().replace('/', ' ').replace('_', ' ').replace('-', ' ').split()
-    for token in tokens or ['empty']:
-        digest = hashlib.sha256(token.encode('utf-8')).digest()
-        for offset in range(0, len(digest), 2):
-            idx = int.from_bytes(digest[offset:offset + 2], 'big') % EMBEDDING_DIMENSIONS
-            vector[idx] += 1.0
-    norm = math.sqrt(sum(item * item for item in vector)) or 1.0
-    return [round(item / norm, 6) for item in vector]
+    model = _get_model()
+    embeddings = list(model.embed([value]))
+    return [round(float(x), 6) for x in embeddings[0].tolist()]
 
 
 def vector_literal(vector: list[float]) -> str:

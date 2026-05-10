@@ -8,7 +8,7 @@ from aiops_shared.projector import apply_event_to_projection
 from aiops_shared.schemas import AISettingsOut, SupervisorDecisionOut
 from aiops_shared.utils import utcnow
 
-from .config import AI_MODEL, AI_PROVIDER
+from .config import AI_MODEL, AI_PROVIDER, SUPERVISOR_CONFIDENCE_THRESHOLD
 from .fsm import apply_transition
 from .llm_client import SupervisorAdvisor
 
@@ -43,6 +43,31 @@ class AnalysisService:
             reasoning_trace=str(decision.get('reasoning_trace') or ''),
         )
         decision.update(normalized.model_dump())
+
+        confidence = float(decision.get('confidence', 0.0))
+        needs_human = bool(decision.get('needs_human', False)) or confidence < SUPERVISOR_CONFIDENCE_THRESHOLD
+        if needs_human:
+            decision['next_state'] = incident.status.value
+            decision['needs_human'] = True
+            decision['human_request'] = str(decision.get('human_request') or 'Supervisor confidence is too low; human SRE review is required.')
+            decision['reasoning_trace'] = (
+                f"{decision.get('reasoning_trace', '')} | "
+                f"low_confidence={confidence:.2f}_human_review_required"
+            ).strip(' |')
+            await append_event(
+                session,
+                stream_id=incident.id,
+                event_type='supervisor.human_review_requested',
+                actor='supervisor',
+                correlation_id=correlation_id,
+                payload={
+                    'confidence': confidence,
+                    'threshold': SUPERVISOR_CONFIDENCE_THRESHOLD,
+                    'human_request': decision['human_request'],
+                    'recommended_actions': decision.get('recommended_actions', []),
+                },
+                metadata=metadata | {'actor': actor},
+            )
 
         next_state = str(decision.get('next_state') or incident.status.value).lower()
         try:
@@ -87,6 +112,8 @@ class AnalysisService:
                 'recommended_actions': decision['recommended_actions'],
                 'requested_context': decision.get('requested_context', []),
                 'react_trace': decision.get('react_trace', []),
+                'needs_human': decision.get('needs_human', False),
+                'human_request': decision.get('human_request', ''),
             },
             metadata=metadata | {
                 'reasoning_output': decision,

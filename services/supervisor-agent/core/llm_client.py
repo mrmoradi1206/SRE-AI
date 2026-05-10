@@ -10,7 +10,8 @@ from aiops_shared.llm_client import run_llm
 from aiops_shared.llm_config import get_agent_system_prompt
 from aiops_shared.database import get_session_factory
 
-from .config import OBSERVABILITY_AGENT_URL, REACT_MAX_ITERATIONS, REPO_AGENT_URL
+from .agent_registry import AGENT_REGISTRY, get_registry_for_prompt
+from .config import REACT_MAX_ITERATIONS
 from .memory import ReActMemory
 from .rag import IncidentRAG
 
@@ -118,7 +119,7 @@ class SupervisorAdvisor:
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
                 analysis_response = await client.post(
-                    f'{OBSERVABILITY_AGENT_URL.rstrip("/")}/api/v1/analyze',
+                    AGENT_REGISTRY['query_observability'].endpoint,
                     json={
                         'incident_id': incident_id,
                         'incident': incident,
@@ -149,7 +150,7 @@ class SupervisorAdvisor:
             incident = bundle.get('incident', {})
             async with httpx.AsyncClient(timeout=8.0) as client:
                 response = await client.post(
-                    f'{REPO_AGENT_URL.rstrip("/")}/api/v1/analyze',
+                    AGENT_REGISTRY['query_repo_changes'].endpoint,
                     json={
                         'incident_id': str(incident.get('id') or ''),
                         'incident': incident,
@@ -170,7 +171,23 @@ class SupervisorAdvisor:
             return await self.query_observability(incident_bundle, action.get('input'))
         if name in {'query_repo_changes', 'get_repo_changes'}:
             return await self.query_repo_changes(incident_bundle, action.get('input'))
-        return {'tool': name or 'unknown', 'source': 'supervisor-agent', 'error': 'unknown tool'}
+        if name == 'query_memory':
+            incident_id = self._incident_id(incident_bundle)
+            limit = 20
+            action_input = action.get('input')
+            if isinstance(action_input, dict):
+                try:
+                    limit = max(1, min(50, int(action_input.get('limit', limit))))
+                except (TypeError, ValueError):
+                    limit = 20
+            history = await self.memory.get_history(incident_id, limit=limit)
+            return {
+                'tool': 'query_memory',
+                'source': 'supervisor-memory',
+                'history': history,
+                'summary': f'Retrieved {len(history)} memory entries for this incident.',
+            }
+        return {'tool': name or 'unknown', 'source': 'error', 'error': 'unknown tool'}
 
     def _incident_id(self, incident_bundle: dict) -> str:
         incident = normalize_incident_bundle(incident_bundle).get('incident', {})
@@ -239,6 +256,8 @@ class SupervisorAdvisor:
             'recommended_actions': decision.get('recommended_actions', fallback['recommended_actions']),
             'next_state': decision.get('next_state', fallback['next_state']),
             'reasoning_trace': decision.get('reasoning_trace', fallback['reasoning_trace']),
+            'needs_human': bool(decision.get('needs_human', fallback.get('needs_human', False))),
+            'human_request': str(decision.get('human_request', fallback.get('human_request', '')) or ''),
         }
 
     def _parse_react_step(self, content: str) -> dict[str, Any]:
@@ -269,73 +288,79 @@ class SupervisorAdvisor:
     async def answer_question(self, incident_bundle: dict, question: str, settings: dict[str, Any]) -> dict[str, Any]:
         incident_id = self._incident_id(incident_bundle)
         bundle = _sanitize_bundle(normalize_incident_bundle(incident_bundle))
-        memory_history = await self.memory.get_history(incident_id)
         react_trace: list[dict[str, Any]] = []
         observations: list[dict[str, Any]] = []
-
-        for specialist_action in (
-            {'name': 'query_observability', 'input': {'focus': question}},
-            {'name': 'query_repo_changes', 'input': {'focus': question}},
-        ):
-            observation = await self._run_action(incident_bundle, specialist_action)
-            observations.append(observation)
-            step = {
-                'kind': 'chat',
-                'iteration': len(react_trace) + 1,
-                'thought': f"Gather evidence from {specialist_action['name']} before answering operator question.",
-                'action': specialist_action,
-                'observation': observation,
-            }
-            react_trace.append(step)
-            await self.memory.append(incident_id, step)
+        llm_traces: list[dict[str, Any]] = []
+        answer = 'I could not produce a confident answer yet.'
+        confidence = 'medium'
+        next_actions: list[Any] = []
+        provider = settings.get('provider')
+        model = settings.get('model')
+        llm_trace: dict[str, Any] | None = None
 
         try:
-            response = await run_llm(
-                settings['provider'],
-                settings['model'],
-                [
-                    {'role': 'system', 'content': get_agent_system_prompt('supervisor')},
+            for iteration in range(1, max(1, REACT_MAX_ITERATIONS) + 1):
+                prompt = json.dumps(
                     {
-                        'role': 'user',
-                        'content': json.dumps(
-                            {
-                                'task': 'You are Cortex Supervisor. Answer the operator question using specialist agent evidence.',
-                                'question': question,
-                                'incident': bundle.get('incident', {}),
-                                'alerts': bundle.get('alerts', []),
-                                'timeline': bundle.get('timeline', [])[-20:],
-                                'memory_history': memory_history,
-                                'specialist_observations': observations,
-                                'format': {
-                                    'answer': 'short markdown answer for operator',
-                                    'confidence': 'low|medium|high',
-                                    'next_actions': ['string'],
-                                },
-                                'rules': [
-                                    'Do not invent evidence.',
-                                    'Reference observability-agent and repo-agent findings explicitly.',
-                                    'Return JSON only.',
-                                ],
-                            },
-                            default=str,
-                        ),
+                        'protocol': 'ReAct chat',
+                        'available_tools': get_registry_for_prompt(),
+                        'observations_so_far': observations,
+                        'question': question,
+                        'incident': bundle.get('incident', {}),
+                        'alerts': bundle.get('alerts', []),
+                        'timeline': bundle.get('timeline', [])[-20:],
+                        'iteration': iteration,
+                        'max_iterations': REACT_MAX_ITERATIONS,
+                        'required_response_json': {
+                            'thought': 'brief reasoning summary',
+                            'action': {'name': 'tool name from available_tools', 'input': 'optional object'},
+                            'final': {'answer': 'operator-facing markdown answer', 'confidence': 'low|medium|high', 'next_actions': ['string']},
+                        },
+                        'rules': [
+                            'You are Cortex Supervisor. You are autonomous. Choose tools only when needed.',
+                            'If you already have enough context, skip tools and return final immediately.',
+                            'Use at most one tool per iteration.',
+                            'Return JSON only.',
+                        ],
                     },
-                ],
-                temperature=0.1,
-                max_tokens=800,
-            )
-            parsed = self._parse_react_step(response['content'])
-            answer = str(parsed.get('answer') or 'I could not produce a confident answer yet.')
-            confidence = str(parsed.get('confidence') or 'medium').lower()
-            next_actions = parsed.get('next_actions') if isinstance(parsed.get('next_actions'), list) else []
-            llm_trace = response.get('trace')
-            provider = response.get('provider')
-            model = response.get('model')
+                    default=str,
+                )
+                response = await run_llm(
+                    settings['provider'],
+                    settings['model'],
+                    [
+                        {'role': 'system', 'content': get_agent_system_prompt('supervisor')},
+                        {'role': 'user', 'content': prompt},
+                    ],
+                    temperature=0.1,
+                    max_tokens=800,
+                )
+                if response.get('trace'):
+                    llm_traces.append(response['trace'])
+                provider = response.get('provider')
+                model = response.get('model')
+                parsed = self._parse_react_step(response['content'])
+                action = parsed.get('action') if isinstance(parsed.get('action'), dict) else None
+                thought = str(parsed.get('thought') or '')
+                if action:
+                    observation = await self._run_action(incident_bundle, action)
+                    observations.append(observation)
+                    step = {'kind': 'chat', 'iteration': iteration, 'thought': thought, 'action': action, 'observation': observation}
+                    react_trace.append(step)
+                    await self.memory.append(incident_id, step)
+                    continue
+
+                final = parsed.get('final') if isinstance(parsed.get('final'), dict) else parsed
+                answer = str(final.get('answer') or answer)
+                confidence = str(final.get('confidence') or confidence).lower()
+                next_actions = final.get('next_actions') if isinstance(final.get('next_actions'), list) else []
+                break
+            llm_trace = {'status': 'ok', 'iterations': len(react_trace), 'calls': llm_traces}
         except Exception as exc:  # noqa: BLE001
             logger.warning('supervisor_chat_llm_fallback_used', extra={'provider': settings.get('provider'), 'model': settings.get('model'), 'error_type': type(exc).__name__})
             answer = (
-                'Supervisor collected evidence from observability and repository agents, but final LLM synthesis is unavailable. '
-                'Review the per-agent summary below and execute the listed next actions.'
+                'Supervisor could not complete final LLM synthesis. '
+                'Review the agent summary below and continue triage from collected context.'
             )
             confidence = 'low'
             next_actions = [
@@ -345,12 +370,12 @@ class SupervisorAdvisor:
             llm_trace = {'status': 'fallback', 'error': type(exc).__name__, 'provider': settings.get('provider'), 'model': settings.get('model')}
             provider = settings.get('provider')
             model = settings.get('model')
-        agent_summary = {
-            'supervisor-agent': 'Synthesized observability and repository evidence into an operator-facing answer.',
-            'observability-agent': self._summarize_observation(observations[0]) if observations else 'No observability call.',
-            'repo-agent': self._summarize_observation(observations[1]) if len(observations) > 1 else 'No repo call.',
-            'history-agent': 'Provided incident, alert, and timeline context used by Supervisor.',
-        }
+
+        agent_summary = {'supervisor-agent': 'Selected tools from the registry and synthesized available evidence into an operator-facing answer.'}
+        for observation in observations:
+            source = str(observation.get('source') or observation.get('tool') or 'unknown')
+            agent_summary[source] = self._summarize_observation(observation)
+        agent_summary.setdefault('history-agent', 'Provided incident, alert, and timeline context used by Supervisor.')
         final_step = {
             'kind': 'chat',
             'iteration': len(react_trace) + 1,
@@ -378,7 +403,6 @@ class SupervisorAdvisor:
         llm_traces: list[dict[str, Any]] = []
         try:
             bundle = _sanitize_bundle(normalize_incident_bundle(incident_bundle))
-            memory_history = await self.memory.get_history(incident_id)
             rag_query = json.dumps({'incident': bundle.get('incident'), 'alerts': bundle.get('alerts', [])[:3]}, default=str)
             async with get_session_factory()() as rag_session:
                 similar_past_incidents = await self.rag.retrieve_similar_incidents(
@@ -388,43 +412,31 @@ class SupervisorAdvisor:
                     limit=5,
                 )
             observations: list[dict[str, Any]] = []
-            # Cortex contract: Supervisor is the commander and always asks specialist agents for evidence first.
-            for specialist_action in [
-                {'name': 'query_observability', 'input': None},
-                {'name': 'query_repo_changes', 'input': None},
-            ]:
-                observation = await self._run_action(incident_bundle, specialist_action)
-                observations.append(observation)
-                preflight_step = {
-                    'iteration': 0,
-                    'thought': f"Cortex Supervisor requested {specialist_action['name']} before final reasoning.",
-                    'action': specialist_action,
-                    'observation': observation,
-                }
-                react_trace.append(preflight_step)
-                await self.memory.append(incident_id, preflight_step)
-
             final_decision: dict[str, Any] | None = None
             for iteration in range(1, max(1, REACT_MAX_ITERATIONS) + 1):
                 prompt = json.dumps(
                     {
                         'protocol': 'ReAct',
+                        'available_tools': get_registry_for_prompt(),
+                        'observations_so_far': observations,
                         'required_response_json': {
-                            'thought': 'brief private reasoning summary',
-                            'action': {'name': 'query_observability|query_repo_changes', 'input': 'optional query or object'},
+                            'thought': 'brief reasoning summary',
+                            'action': {'name': 'tool name from available_tools', 'input': 'optional object'},
                             'final': {
                                 'root_cause': 'string',
                                 'confidence': 0.0,
                                 'recommended_actions': [{'priority': 1, 'action': 'string'}],
                                 'next_state': 'open|investigating|mitigating|resolved|closed',
                                 'reasoning_trace': 'short trace',
+                                'needs_human': False,
+                                'human_request': 'string when human review is needed',
                             },
                         },
                         'rules': [
-                            'Use at most one action per iteration.',
-                            'If you need metrics/log context, return action.name=query_observability and omit final.',
-                            'If recent code changes could explain the incident, return action.name=query_repo_changes and omit final.',
-                            'If enough context is available, omit action and return final.',
+                            'You are Cortex Supervisor. You are autonomous. Choose tools only when needed.',
+                            'If you already have enough context, skip tools and return final immediately.',
+                            'Use at most one tool per iteration.',
+                            'If confidence < 0.6 after collecting evidence, set needs_human=true in final.',
                             'Return JSON only.',
                         ],
                         'iteration': iteration,
@@ -435,8 +447,6 @@ class SupervisorAdvisor:
                         'timeline': bundle.get('timeline', []),
                         'similar_incidents': bundle.get('similar_incidents', []),
                         'similar_past_incidents': similar_past_incidents,
-                        'observations': observations,
-                        'memory_history': memory_history,
                         'fallback': fallback,
                         'request': 'Analyze the incident and recommend the next safe lifecycle state.',
                     },
@@ -481,8 +491,8 @@ class SupervisorAdvisor:
 
             return {
                 **final_decision,
-                'provider': response['provider'],
-                'model': response['model'],
+                'provider': response.get('provider', settings.get('provider')),
+                'model': response.get('model', settings.get('model')),
                 'context_enrichment': fallback['context_enrichment'],
                 'llm_trace': {'status': 'ok', 'iterations': len(react_trace), 'calls': llm_traces},
                 'react_trace': react_trace,

@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "interval_seconds": 10,
+  "proxy_url": "",
+  "timeout_seconds": 30.0,
+  "url": "https://alert.dr-msh.snpb.app",
+  "verify_tls": true
+}

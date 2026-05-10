@@ -14,3 +14,4 @@ opentelemetry-sdk==1.24.0
 opentelemetry-exporter-jaeger-thrift==1.21.0
 redis==5.0.4
 pgvector==0.2.5
+fastembed==0.3.6
