@@ -412,6 +412,7 @@ class SupervisorAdvisor:
                     limit=5,
                 )
             observations: list[dict[str, Any]] = []
+            response: dict[str, Any] = {}
             final_decision: dict[str, Any] | None = None
             for iteration in range(1, max(1, REACT_MAX_ITERATIONS) + 1):
                 prompt = json.dumps(
