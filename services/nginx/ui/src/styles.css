@@ -3044,3 +3044,240 @@ pre {
   background: linear-gradient(135deg, rgba(37, 99, 235, 0.14), rgba(124, 58, 237, 0.12));
   color: var(--accent-strong);
 }
+
+/* Light-mode contrast pass: keep color, remove unreadable white text */
+:root:not([data-theme="dark"]) .hero-card {
+  color: var(--ink);
+}
+
+:root:not([data-theme="dark"]) .hero-card h3,
+:root:not([data-theme="dark"]) .hero-card h4,
+:root:not([data-theme="dark"]) .hero-card strong,
+:root:not([data-theme="dark"]) .hero-card .brand-name {
+  color: var(--ink);
+}
+
+:root:not([data-theme="dark"]) .hero-card p:not(.eyebrow),
+:root:not([data-theme="dark"]) .hero-card .muted-text {
+  color: #334155;
+}
+
+:root:not([data-theme="dark"]) .hero-card .eyebrow {
+  color: var(--accent-strong);
+}
+
+:root:not([data-theme="dark"]) .hero-card .ops-strip span,
+:root:not([data-theme="dark"]) .hero-card .provider-strip span,
+:root:not([data-theme="dark"]) .workflow-node {
+  color: var(--ink);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.58), rgba(219, 234, 254, 0.66));
+  border-color: rgba(37, 99, 235, 0.20);
+  box-shadow: 0 10px 26px rgba(37, 99, 235, 0.10);
+}
+
+:root:not([data-theme="dark"]) .hero-card .ops-strip small,
+:root:not([data-theme="dark"]) .hero-card .provider-strip small,
+:root:not([data-theme="dark"]) .workflow-node small,
+:root:not([data-theme="dark"]) .workflow-node p {
+  color: var(--muted);
+}
+
+:root:not([data-theme="dark"]) .workflow-node span {
+  color: var(--accent-strong);
+}
+
+:root:not([data-theme="dark"]) .count-pill,
+:root:not([data-theme="dark"]) .tool-badge,
+:root:not([data-theme="dark"]) .tab-count {
+  color: var(--accent-strong);
+  background: rgba(219, 234, 254, 0.78);
+  border-color: rgba(37, 99, 235, 0.22);
+}
+
+:root:not([data-theme="dark"]) .sidebar-status,
+:root:not([data-theme="dark"]) .alert-strip,
+:root:not([data-theme="dark"]) .urgency-banner,
+:root:not([data-theme="dark"]) .human-review-prompt {
+  color: var(--ink);
+}
+
+:root:not([data-theme="dark"]) .quick-action-icon {
+  filter: drop-shadow(0 6px 10px rgba(37, 99, 235, 0.18));
+}
+
+/* Final color normalization pass */
+:root:not([data-theme="dark"]) {
+  --surface-text: #0f172a;
+  --surface-muted: #475569;
+  --surface-faint: #64748b;
+  --surface-tint: rgba(219, 234, 254, 0.74);
+  --surface-tint-strong: rgba(224, 242, 254, 0.92);
+}
+
+:root[data-theme="dark"] {
+  --surface-text: #f8fafc;
+  --surface-muted: #94a3b8;
+  --surface-faint: #cbd5e1;
+  --surface-tint: rgba(15, 23, 42, 0.82);
+  --surface-tint-strong: rgba(17, 24, 39, 0.94);
+}
+
+.content,
+.page-grid,
+.detail-grid,
+.war-room-layout,
+.integrations-page {
+  color: var(--surface-text);
+}
+
+.panel,
+.hero-card,
+.metric-card,
+.copy-card,
+.health-card,
+.prompt-card,
+.integration-card,
+.llm-agent-card,
+.empty-state,
+.incident-row,
+.stack-item,
+.timeline-item,
+.cot-step,
+.chat-bubble.assistant,
+.war-room-logs,
+.war-room-scope,
+.incident-detail-meta-row,
+.agent-ledger-card,
+.provider-settings-card {
+  color: var(--surface-text);
+}
+
+.panel :where(h1,h2,h3,h4,strong,label,summary,td,th),
+.hero-card :where(h1,h2,h3,h4,strong,label,summary),
+.metric-card :where(h1,h2,h3,h4,strong,label),
+.copy-card :where(h1,h2,h3,h4,strong,label),
+.health-card :where(h1,h2,h3,h4,strong,label),
+.prompt-card :where(h1,h2,h3,h4,strong,label),
+.integration-card :where(h1,h2,h3,h4,strong,label),
+.llm-agent-card :where(h1,h2,h3,h4,strong,label),
+.incident-row :where(h1,h2,h3,h4,strong,label),
+.stack-item :where(h1,h2,h3,h4,strong,label),
+.timeline-item :where(h1,h2,h3,h4,strong,label),
+.cot-step :where(h1,h2,h3,h4,strong,label),
+.chat-bubble.assistant :where(h1,h2,h3,h4,strong,label) {
+  color: var(--surface-text);
+}
+
+.panel :where(p,small,span,li,dd,dt),
+.hero-card :where(p,small,span,li,dd,dt),
+.metric-card :where(p,small,span,li,dd,dt),
+.copy-card :where(p,small,span,li,dd,dt),
+.health-card :where(p,small,span,li,dd,dt),
+.prompt-card :where(p,small,span,li,dd,dt),
+.integration-card :where(p,small,span,li,dd,dt),
+.llm-agent-card :where(p,small,span,li,dd,dt),
+.incident-row :where(p,small,span,li,dd,dt),
+.stack-item :where(p,small,span,li,dd,dt),
+.timeline-item :where(p,small,span,li,dd,dt),
+.cot-step :where(p,small,span,li,dd,dt),
+.chat-bubble.assistant :where(p,small,span,li,dd,dt),
+.muted-text,
+.field-hint,
+.topbar-sub {
+  color: var(--surface-muted);
+}
+
+.eyebrow,
+.panel .eyebrow,
+.hero-card .eyebrow,
+.metric-card .eyebrow,
+.copy-card .eyebrow,
+.health-card .eyebrow,
+.prompt-card .eyebrow,
+.integration-card .eyebrow,
+.llm-agent-card .eyebrow {
+  color: var(--accent-strong);
+}
+
+/* Keep intentional high-contrast gradient elements readable. */
+button:not(.ghost-button),
+.chat-bubble.user,
+.chat-bubble.user *,
+.brand-mark,
+.quick-action-btn:hover,
+.danger-button,
+button.danger-button {
+  color: white;
+}
+
+/* Re-assert semantic chip colors after broad text normalization. */
+.status-chip.status-open { color: var(--danger); background: var(--danger-soft); }
+.status-chip.status-investigating { color: var(--warning); background: var(--warning-soft); }
+.status-chip.status-mitigating { color: var(--info); background: var(--info-soft); }
+.status-chip.status-resolved { color: var(--success); background: var(--success-soft); }
+.status-chip.status-closed { color: var(--closed); background: var(--closed-soft); }
+.status-chip.status-ok { color: var(--success); background: var(--success-soft); }
+.status-chip.status-failed,
+.status-chip.status-pending { color: var(--danger); background: var(--danger-soft); }
+.severity-chip.severity-critical { color: var(--sev-critical); background: var(--sev-critical-soft); }
+.severity-chip.severity-warning { color: var(--sev-warning); background: var(--sev-warning-soft); }
+.severity-chip.severity-info { color: var(--sev-info); background: var(--sev-info-soft); }
+.count-pill,
+.tool-badge,
+.tab-count { color: var(--accent-strong); }
+.confidence-badge.high { color: var(--success); }
+.confidence-badge.moderate { color: var(--warning); }
+.confidence-badge.low { color: var(--danger); }
+
+:root:not([data-theme="dark"]) .hero-card,
+:root:not([data-theme="dark"]) .panel,
+:root:not([data-theme="dark"]) .metric-card,
+:root:not([data-theme="dark"]) .copy-card,
+:root:not([data-theme="dark"]) .health-card,
+:root:not([data-theme="dark"]) .prompt-card,
+:root:not([data-theme="dark"]) .integration-card,
+:root:not([data-theme="dark"]) .llm-agent-card,
+:root:not([data-theme="dark"]) .empty-state,
+:root:not([data-theme="dark"]) .incident-row,
+:root:not([data-theme="dark"]) .stack-item,
+:root:not([data-theme="dark"]) .timeline-item,
+:root:not([data-theme="dark"]) .cot-step,
+:root:not([data-theme="dark"]) .chat-bubble.assistant {
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.94), rgba(207, 250, 254, 0.68));
+}
+
+:root:not([data-theme="dark"]) .hero-card {
+  background:
+    radial-gradient(circle at 15% 12%, rgba(59, 130, 246, 0.18), transparent 18rem),
+    radial-gradient(circle at 88% 18%, rgba(124, 58, 237, 0.16), transparent 18rem),
+    linear-gradient(135deg, #bfdbfe, #ddd6fe 52%, #99f6e4);
+}
+
+:root:not([data-theme="dark"]) .data-table tr:hover td,
+:root:not([data-theme="dark"]) .quick-action-btn,
+:root:not([data-theme="dark"]) input,
+:root:not([data-theme="dark"]) select,
+:root:not([data-theme="dark"]) textarea,
+:root:not([data-theme="dark"]) pre,
+:root:not([data-theme="dark"]) .json-viewer,
+:root:not([data-theme="dark"]) .tool-calls-summary summary {
+  color: var(--surface-text);
+  background: rgba(219, 234, 254, 0.72);
+}
+
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea,
+:root[data-theme="dark"] pre,
+:root[data-theme="dark"] .json-viewer {
+  color: var(--surface-text);
+  background: rgba(2, 6, 23, 0.52);
+}
+
+:root:not([data-theme="dark"]) ::placeholder {
+  color: #64748b;
+}
+
+:root[data-theme="dark"] ::placeholder {
+  color: #94a3b8;
+}
