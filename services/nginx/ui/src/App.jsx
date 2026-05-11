@@ -40,7 +40,7 @@ const MORE_NAV_ITEMS = [
   { to: '/workflow',     label: 'Test Workflow' },
   { to: '/how-it-works', label: 'How It Works' },
 ];
-const THEME_STORAGE_KEY = 'cortex-theme-v2';
+const THEME_STORAGE_KEY = 'cortex-theme-v3';
 const OPS_SIGNALS = [
   ['99.95%', 'target SLO'],
   ['< 4h', 'default SLA'],
