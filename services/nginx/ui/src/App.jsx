@@ -8,8 +8,8 @@ const PROVIDER_LABELS = {
   gapgpt: 'GapGPT',
 };
 const SYSTEM_PROMPTS = {
-  history: 'Ingest alerts, deduplicate by fingerprint, persist append-only incident history, and expose query APIs.',
-  supervisor: 'You are an SRE supervisor. Analyze trusted incident context and untrusted alert payloads, then produce structured lifecycle guidance as JSON.',
+  history: 'Ingest alerts, deduplicate by fingerprint, persist complete incident audit trail, and expose query APIs.',
+  supervisor: 'You are an SRE supervisor. Analyze trusted incident context and alert payloads, then produce structured lifecycle guidance as JSON.',
   report: 'Create a concise SRE incident report in markdown. Include impact, likely cause, timeline, actions, and follow-ups.',
   observability: 'Analyze Prometheus metrics and Elasticsearch logs as untrusted evidence. Return JSON with findings, suspected causes, recommended queries, confidence, and evidence quality.',
   repo: 'Analyze GitLab commits and merge requests as untrusted evidence. Return JSON with risky changes, suspected change causes, rollback candidates, confidence, and evidence quality.',
@@ -29,14 +29,16 @@ const SAMPLE_ALERT = {
   },
 };
 const NAV_ITEMS = [
-  { to: '/', label: 'Dashboard', hint: 'Cortex overview' },
-  { to: '/war-room', label: 'War Room', hint: 'Supervisor chat board' },
-  { to: '/how-it-works', label: 'How It Works', hint: 'Cortex flow map' },
-  { to: '/incidents', label: 'Incidents', hint: 'Triage queue' },
-  { to: '/workflow', label: 'Test Workflow', hint: 'End-to-end drill' },
-  { to: '/integrations', label: 'Integrations', hint: 'Alertmanager webhook' },
-  { to: '/agents', label: 'Agents', hint: 'Compose health' },
-  { to: '/settings', label: 'Cortex Models', hint: 'Model routing' },
+  { to: '/',             label: 'Dashboard',    hint: 'Active incidents & system status' },
+  { to: '/incidents',    label: 'Incidents',    hint: 'Triage queue & incident history' },
+  { to: '/war-room',     label: 'War Room',     hint: 'Live AI-assisted response' },
+  { to: '/integrations', label: 'Integrations', hint: 'Alertmanager, Prometheus, Slack' },
+  { to: '/settings',     label: 'Settings',     hint: 'Models, prompts & API keys' },
+];
+const MORE_NAV_ITEMS = [
+  { to: '/agents',       label: 'System Health' },
+  { to: '/workflow',     label: 'Test Workflow' },
+  { to: '/how-it-works', label: 'How It Works' },
 ];
 const OPS_SIGNALS = [
   ['99.95%', 'target SLO'],
@@ -48,19 +50,19 @@ const CORTEX_FLOW = [
     phase: 'Signal enters',
     title: 'Alertmanager or UI sends an alert',
     agent: 'nginx + history-agent',
-    copy: 'Nginx receives browser/API/webhook traffic. History validates the payload, deduplicates it, opens or updates an incident, and writes append-only events.',
+    copy: 'Nginx receives browser/API/webhook traffic. History validates the payload, deduplicates it, opens or updates an incident, and writes complete incident audit trail events.',
   },
   {
     phase: 'Brain starts',
     title: 'Supervisor becomes commander',
     agent: 'supervisor-agent',
-    copy: 'Supervisor loads incident context, retrieves similar learned incidents, and starts a ReAct loop: think, call a tool, observe evidence, then decide.',
+    copy: 'Supervisor loads incident context, retrieves similar learned incidents, and starts an AI reasoning loop: think, call a tool, observe evidence, then decide.',
   },
   {
     phase: 'Evidence loop',
     title: 'Specialist agents report back',
     agent: 'observability-agent + repo-agent',
-    copy: 'Observability checks Prometheus and Elasticsearch. Repo checks GitLab commits and merge requests. Both can use LLMs, but their answer goes back to Supervisor.',
+    copy: 'Observability checks Prometheus and Elasticsearch. Repo checks GitLab commits and merge requests. AI agents gather data and report back to Supervisor.',
   },
   {
     phase: 'Operator output',
@@ -71,17 +73,17 @@ const CORTEX_FLOW = [
   {
     phase: 'Learn',
     title: 'Approved fixes become memory',
-    agent: 'pgvector',
-    copy: 'When an SRE clicks Approve & Learn, the final root cause and resolution become long-term knowledge for future Cortex investigations.',
+    agent: 'Long-term Memory',
+    copy: 'When an SRE clicks Save to Memory, the final root cause and resolution become long-term knowledge for future Cortex investigations.',
   },
 ];
 const CORTEX_PARTS = [
   ['History', 'Deduplicates alerts, owns incident state, stores raw samples and timeline events.'],
-  ['Supervisor', 'The brain and commander. Runs ReAct, calls tools, decides lifecycle and next actions.'],
+  ['Supervisor', 'The brain and commander. Runs AI reasoning, calls tools, decides lifecycle and next actions.'],
   ['Observability', 'Reads Prometheus metrics and Elasticsearch logs, then returns evidence to Supervisor.'],
   ['Repo', 'Reads GitLab commits/MRs, finds risky changes, and returns code evidence to Supervisor.'],
   ['Report', 'Builds final incident reports and sends them to Mattermost or other channels.'],
-  ['Memory', 'Redis keeps short-term ReAct traces. pgvector stores approved long-term lessons.'],
+  ['Memory', 'Redis keeps short-term AI reasoning traces. Long-term Memory stores approved long-term lessons.'],
   ['Integrations', 'Alertmanager, Mattermost, Prometheus, Elasticsearch, GitLab, LLM providers, and proxies.'],
   ['UI', 'Cortex Command Center for triage, agent logs, investigations, configuration, and cleanup.'],
 ];
@@ -103,7 +105,7 @@ const SRE_OPERATOR_PLAYBOOK = [
     actions: [
       'Open Incidents, filter by status or severity, and pick the newest/highest-risk incident.',
       'Read the incident header, alert samples, SLA deadline, service labels, and timeline.',
-      'Click Ask Cortex Supervisor or Investigate so the commander gathers evidence from agents.',
+      'Click Ask AI or Investigate so the commander gathers evidence from agents.',
     ],
     button: 'Incidents',
     to: '/incidents',
@@ -112,9 +114,9 @@ const SRE_OPERATOR_PLAYBOOK = [
     stage: '3. Validate the agent evidence',
     goal: 'Use Cortex as a co-pilot, not a black box.',
     actions: [
-      'Review Cortex command log to confirm Observability and Repo reported back to Supervisor.',
-      'Expand ReAct Thought, Action, and Observation steps to understand why Supervisor made its decision.',
-      'Run Prometheus, Elasticsearch, or GitLab widgets manually when you need extra proof.',
+      'Review Agent Actions Log to confirm Observability and Repo reported back to Supervisor.',
+      'Expand AI reasoning 🤔 Reasoning, ⚡ Action, and 📊 Result steps to understand why Supervisor made its decision.',
+      'Run Metrics Query, Elasticsearch, or GitLab widgets manually when you need extra proof.',
     ],
     button: 'How traces look',
     to: '/workflow',
@@ -135,7 +137,7 @@ const SRE_OPERATOR_PLAYBOOK = [
     goal: 'Close the loop so the next incident is faster.',
     actions: [
       'Click Resolve only after Alertmanager/service signals are healthy and the customer impact is gone.',
-      'Click Approve & Learn, edit the root cause and resolution, and save the final human-approved lesson.',
+      'Click Save to Memory, edit the root cause and resolution, and save the final human-approved lesson.',
       'Use the latest report and command log for post-incident review and follow-up tasks.',
     ],
     button: 'Review queue',
@@ -169,12 +171,25 @@ function formatDate(value) {
   return new Date(value).toLocaleString();
 }
 
-function EmptyState({ title, copy }) {
+function elapsedLabelFrom(value) {
+  if (!value) return '—';
+  const ms = Date.now() - new Date(value).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return rem > 0 ? `${hrs}h ${rem}m` : `${hrs}h`;
+}
+
+function EmptyState({ title, body, copy, action }) {
+  const text = body || copy;
   return (
     <div className="empty-state">
-      <span aria-hidden="true">+</span>
-      <strong>{title}</strong>
-      <p>{copy}</p>
+      <div className="empty-state-icon">📭</div>
+      <h4>{title}</h4>
+      {text && <p className="muted-text">{text}</p>}
+      {action}
     </div>
   );
 }
@@ -310,13 +325,13 @@ function ReActTracePanel({ trace, loading }) {
     <div className="panel span-2 cot-panel">
       <div className="panel-header">
         <div>
-          <p className="eyebrow">Supervisor ReAct</p>
-          <h3>Chain of Thought Trace</h3>
+          <p className="eyebrow">AI reasoning loop</p>
+          <h3>AI Reasoning Trace</h3>
         </div>
         <span className="count-pill">{loading ? 'polling' : `${steps.length} steps`}</span>
       </div>
       {!steps.length ? (
-        <EmptyState title="No ReAct steps yet" copy="Ask Supervisor or wait while an investigating incident is analyzed." />
+        <EmptyState title="No reasoning steps yet" copy="Ask Supervisor or wait while an investigating incident is analyzed." />
       ) : (
         <div className="cot-list">
           {steps.map((step, index) => (
@@ -327,24 +342,29 @@ function ReActTracePanel({ trace, loading }) {
               </div>
               {step.thought ? (
                 <div className="cot-thought">
-                  <strong>Thought</strong>
+                  <strong>🤔 Reasoning</strong>
                   <p>{step.thought}</p>
                 </div>
               ) : null}
               {step.action ? (
                 <div className="cot-action">
-                  <strong>Action</strong>
+                  <strong>⚡ Action</strong>
                   <span className="tool-badge">{step.action.name || 'tool'}</span>
                   {step.action.input ? <code>{typeof step.action.input === 'string' ? step.action.input : JSON.stringify(step.action.input)}</code> : null}
                 </div>
               ) : null}
               {step.observation ? (
                 <div className="cot-observation">
-                  <strong>Observation</strong>
+                  <strong>📊 Result</strong>
                   <pre>{JSON.stringify(safeJson(step.observation), null, 2)}</pre>
                 </div>
               ) : null}
-              {step.final ? <JsonBlock title="Final decision" data={step.final} /> : null}
+              {step.final ? (
+                <div className="cot-observation">
+                  <strong>Final decision</strong>
+                  <pre>{JSON.stringify(safeJson(step.final), null, 2)}</pre>
+                </div>
+              ) : null}
             </article>
           ))}
         </div>
@@ -410,7 +430,7 @@ function IncidentIntegrationsPanel({ incident }) {
     <div className="panel span-2">
       <div className="panel-header">
         <div>
-          <p className="eyebrow">Live integrations</p>
+          <p className="eyebrow">Live Data Explorer</p>
           <h3>Metrics, logs, and repo changes</h3>
         </div>
         <span className="count-pill">{serviceName || 'service unknown'}</span>
@@ -418,17 +438,17 @@ function IncidentIntegrationsPanel({ incident }) {
       <div className="integration-grid">
         <div className="copy-card integration-card">
           <label>
-            PromQL
+            Metrics Query
             <input value={query} onChange={(event) => setQuery(event.target.value)} />
           </label>
-          <button type="button" disabled={busy === 'metrics'} onClick={loadMetrics}>{busy === 'metrics' ? 'Querying...' : 'Query Prometheus'}</button>
-          {metrics ? <JsonBlock title="Prometheus result" data={metrics.data || metrics} /> : null}
+          <button type="button" disabled={busy === 'metrics'} onClick={loadMetrics}>{busy === 'metrics' ? 'Querying...' : 'Run Metrics Query'}</button>
+          {metrics ? <pre>{JSON.stringify(safeJson(metrics.data || metrics), null, 2)}</pre> : null}
         </div>
         <div className="copy-card integration-card">
           <p><strong>Elasticsearch errors</strong></p>
           <p>Searches recent ERROR, Exception, and Traceback logs for the detected service.</p>
           <button type="button" disabled={busy === 'logs' || !serviceName} onClick={loadLogs}>{busy === 'logs' ? 'Searching...' : 'Search recent errors'}</button>
-          {logs ? <JsonBlock title="Error logs" data={logs.entries || logs} /> : null}
+          {logs ? <pre>{JSON.stringify(safeJson(logs.entries || logs), null, 2)}</pre> : null}
         </div>
         <div className="copy-card integration-card">
           <label>
@@ -436,7 +456,7 @@ function IncidentIntegrationsPanel({ incident }) {
             <input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="group/project or numeric ID" />
           </label>
           <button type="button" disabled={busy === 'repo'} onClick={loadRepo}>{busy === 'repo' ? 'Loading...' : 'Fetch GitLab changes'}</button>
-          {repo ? <JsonBlock title="Recent commits and MRs" data={repo} /> : null}
+          {repo ? <pre>{JSON.stringify(safeJson(repo), null, 2)}</pre> : null}
         </div>
       </div>
       {error ? <p className="error-text">{error}</p> : null}
@@ -457,7 +477,7 @@ function SimilarIncidentsPanel({ similar }) {
         <span className="count-pill">{items.length} matches</span>
       </div>
       {!items.length ? (
-        <EmptyState title="No learned incidents yet" copy="Approve resolved incidents to build the pgvector knowledge base." />
+        <EmptyState title="No similar incidents found" body="Past incidents will appear here once Cortex has more data." />
       ) : (
         <div className="stack-list">
           {items.map((item) => (
@@ -468,7 +488,8 @@ function SimilarIncidentsPanel({ similar }) {
               </div>
               <strong>{item.summary}</strong>
               <p>{item.service || 'unknown service'} - {formatDate(item.created_at)}</p>
-              <JsonBlock title="Root cause and resolution" data={{ root_cause: item.root_cause, resolution: item.resolution }} />
+              <p><strong>Root cause:</strong> {item.root_cause || 'Not recorded yet.'}</p>
+              <p><strong>Resolution:</strong> {item.resolution || 'Not recorded yet.'}</p>
             </article>
           ))}
         </div>
@@ -508,7 +529,7 @@ function ApproveLearnModal({ incident, trace, report, onClose, onSaved }) {
         <div className="panel-header">
           <div>
             <p className="eyebrow">Human feedback loop</p>
-            <h3>Approve & Learn</h3>
+            <h3>Save to Memory</h3>
           </div>
           <button type="button" className="ghost-button" onClick={onClose}>Close</button>
         </div>
@@ -603,6 +624,14 @@ function Shell({ children }) {
             </NavLink>
           ))}
         </nav>
+        <div className="nav-more">
+          <span className="eyebrow" style={{ display: 'block', padding: '0 .75rem', marginBottom: '.5rem' }}>More</span>
+          {MORE_NAV_ITEMS.map((item) => (
+            <NavLink key={item.to} to={item.to} className={({ isActive }) => `nav-more-link${isActive ? ' active' : ''}`}>
+              {item.label}
+            </NavLink>
+          ))}
+        </div>
         <div className="sidebar-status">
           <span className="live-dot" />
           <div>
@@ -643,97 +672,117 @@ function MetricCard({ title, value, subtitle, tone = 'neutral' }) {
 function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [incidents, setIncidents] = useState([]);
-  const [recentAlerts, setRecentAlerts] = useState([]);
   const [error, setError] = useState('');
 
   useEffect(() => {
     Promise.all([
       apiFetch('/history/dashboard'),
       apiFetch('/history/incidents?page=1&page_size=6'),
-      apiFetch('/history/alerts/recent?hours=24&limit=6'),
     ])
-      .then(([dashboard, incidentList, recent]) => {
+      .then(([dashboard, incidentList]) => {
         setStats(dashboard);
         setIncidents(incidentList.items || []);
-        setRecentAlerts(recent.items || []);
       })
       .catch((err) => setError(err.message));
   }, []);
 
+  const activeCount = (stats?.open_incidents_count || 0) + (stats?.investigating_incidents_count || 0) + (stats?.mitigating_incidents_count || 0);
+
   return (
-    <section className="page-grid">
-      <div className="hero-card span-2">
-        <div className="hero-copy">
-          <p className="eyebrow">Cortex pulse</p>
-          <h3>Signals, commander state, and incident posture</h3>
-          <p>
-            Cortex surfaces append-only alert history, Supervisor decisions, and recent signal activity without
-            unbounded queries.
-          </p>
+    <>
+      {activeCount > 0 && (
+        <div className="alert-strip">
+          <span className="pulse-dot" />
+          <strong>{activeCount} active incidents</strong>
+          &nbsp;require attention
+          <Link to="/incidents?status=open" className="alert-strip-link">View all →</Link>
         </div>
-        <div className="ops-strip">
-          {OPS_SIGNALS.map(([value, label]) => (
-            <span key={label}>
-              <strong>{value}</strong>
-              <small>{label}</small>
-            </span>
-          ))}
-        </div>
-      </div>
-      <MetricCard title="Open incidents" value={stats?.open_incidents_count ?? '--'} subtitle="Active operator attention" tone="warning" />
-      <MetricCard title="Investigating" value={stats?.investigating_incidents_count ?? '--'} subtitle="Supervisor-assisted triage" tone="info" />
-      <MetricCard title="Mitigating" value={stats?.mitigating_incidents_count ?? '--'} subtitle="Remediation in progress" tone="accent" />
-      <MetricCard title="Resolved in 24h" value={stats?.resolved_last_24h ?? '--'} subtitle="Closed-loop outcomes" tone="success" />
-
-      <div className="panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Queue</p>
-            <h3>Recent incidents</h3>
+      )}
+      <section className="page-grid">
+        <div className="hero-card span-2">
+          <div className="hero-copy">
+            <p className="eyebrow">Cortex pulse</p>
+            <h3>Signals, commander state, and incident posture</h3>
+            <p>
+              Cortex surfaces complete incident audit trail, Supervisor decisions, and recent signal activity without
+              unbounded queries.
+            </p>
           </div>
-          <Link to="/incidents">See all</Link>
+          <div className="ops-strip">
+            {OPS_SIGNALS.map(([value, label]) => (
+              <span key={label}>
+                <strong>{value}</strong>
+                <small>{label}</small>
+              </span>
+            ))}
+          </div>
         </div>
-        {error ? <p className="error-text">{error}</p> : null}
-        <div className="incident-list compact">
-          {incidents.map((incident) => (
-            <Link key={incident.id} className="incident-row" to={`/incidents/${incident.id}`}>
-              <div>
-                <strong>{incident.summary || incident.fingerprint.slice(0, 14)}</strong>
-                <p>{formatDate(incident.last_seen_at)}</p>
-              </div>
-              <div className="incident-meta">
-                <SeverityChip severity={incident.severity} />
-                <StatusChip status={incident.status} />
-              </div>
+        <Link to="/incidents?status=open" style={{ textDecoration: 'none', display: 'block' }}>
+          <MetricCard title="Open" value={stats?.open_incidents_count ?? '--'} subtitle="Active operator attention" tone="danger" />
+        </Link>
+        <Link to="/incidents?status=investigating" style={{ textDecoration: 'none', display: 'block' }}>
+          <MetricCard title="Investigating" value={stats?.investigating_incidents_count ?? '--'} subtitle="Supervisor-assisted triage" tone="warning" />
+        </Link>
+        <Link to="/incidents?status=mitigating" style={{ textDecoration: 'none', display: 'block' }}>
+          <MetricCard title="Mitigating" value={stats?.mitigating_incidents_count ?? '--'} subtitle="Remediation in progress" tone="info" />
+        </Link>
+        <Link to="/incidents?status=resolved" style={{ textDecoration: 'none', display: 'block' }}>
+          <MetricCard title="Resolved Today" value={stats?.resolved_last_24h ?? '--'} subtitle="Closed-loop outcomes" tone="success" />
+        </Link>
+
+        <div className="panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Queue</p>
+              <h3>Recent incidents</h3>
+            </div>
+            <Link to="/incidents">See all</Link>
+          </div>
+          {error ? <p className="error-text">{error}</p> : null}
+          <div className="incident-list compact">
+            {incidents.map((incident) => (
+              <Link key={incident.id} className="incident-row" data-severity={incident.severity?.toLowerCase()} to={`/incidents/${incident.id}`}>
+                <div className="incident-title-row">
+                  <SeverityChip severity={incident.severity} />
+                  <div>
+                    <strong>{incident.summary || incident.fingerprint.slice(0, 14)}</strong>
+                    <p>{elapsedLabelFrom(incident.first_seen_at || incident.last_seen_at)} active</p>
+                  </div>
+                </div>
+                <div className="incident-meta">
+                  <StatusChip status={incident.status} />
+                </div>
+              </Link>
+            ))}
+            {!incidents.length && !error ? (
+              <EmptyState
+                title="No incidents yet"
+                body="Alerts from Alertmanager will appear here once received."
+                action={<Link to="/integrations" className="ghost-button small-button">Configure Integrations</Link>}
+              />
+            ) : null}
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="panel-header"><h3>Quick Actions</h3></div>
+          <div className="quick-actions-grid">
+            <Link to="/war-room" className="quick-action-btn">
+              <span className="quick-action-icon">🎯</span><span>Open War Room</span>
             </Link>
-          ))}
-          {!incidents.length && !error ? <EmptyState title="No incidents yet" copy="Ingest an alert or run the test workflow to populate this queue." /> : null}
-        </div>
-      </div>
-
-      <div className="panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Signal</p>
-            <h3>Recent alerts</h3>
+            <Link to="/workflow" className="quick-action-btn">
+              <span className="quick-action-icon">🧪</span><span>Test Workflow</span>
+            </Link>
+            <Link to="/integrations" className="quick-action-btn">
+              <span className="quick-action-icon">🔌</span><span>Check Integrations</span>
+            </Link>
+            <Link to="/agents" className="quick-action-btn">
+              <span className="quick-action-icon">💚</span><span>System Health</span>
+            </Link>
           </div>
-          <span>24h summary</span>
         </div>
-        <div className="stack-list">
-          {recentAlerts.map((alert) => (
-            <article key={alert.id} className="stack-item">
-              <div className="incident-meta">
-                <SeverityChip severity={alert.severity} />
-                <span>{alert.source || 'unknown source'}</span>
-              </div>
-              <strong>{alert.event_key}</strong>
-              <p>{formatDate(alert.created_at)}</p>
-            </article>
-          ))}
-          {!recentAlerts.length && !error ? <EmptyState title="Quiet window" copy="No alerts returned for the last 24 hours." /> : null}
-        </div>
-      </div>
-    </section>
+      </section>
+    </>
   );
 }
 
@@ -743,7 +792,7 @@ function HowItWorksPage() {
       <div className="hero-card span-2 cortex-hero">
         <div className="hero-copy">
           <p className="eyebrow">How Cortex works</p>
-          <h3>One command brain, many specialist senses</h3>
+          <h3>How Cortex Responds to Incidents</h3>
           <p>
             Cortex is built like an incident-response nervous system: alerts enter through the edge, History keeps the
             memory, Supervisor commands the investigation, specialist agents bring evidence, and Report turns the final
@@ -810,14 +859,14 @@ function HowItWorksPage() {
       <div className="panel cortex-loop-card">
         <div className="panel-header">
           <div>
-            <p className="eyebrow">ReAct loop</p>
-            <h3>How Supervisor thinks</h3>
+            <p className="eyebrow">AI reasoning loop</p>
+            <h3>How Cortex Thinks</h3>
           </div>
         </div>
         <div className="loop-stack">
-          <div><span>Thought</span><p>What is the most likely failure path?</p></div>
+          <div><span>🤔 Reasoning</span><p>What is the most likely failure path?</p></div>
           <div><span>Action</span><p>Call observability or repo tools for evidence.</p></div>
-          <div><span>Observation</span><p>Read metrics, logs, commits, and previous incident memories.</p></div>
+          <div><span>📊 Result</span><p>Read metrics, logs, commits, and previous incident memories.</p></div>
           <div><span>Decision</span><p>Recommend investigation, mitigation, resolution, and report content.</p></div>
         </div>
       </div>
@@ -834,9 +883,9 @@ function HowItWorksPage() {
           <span>Review agent logs</span>
           <span>Run integrations</span>
           <span>Generate report</span>
-          <span>Approve & Learn</span>
+          <span>Save to Memory</span>
         </div>
-        <p className="muted-text">The UI keeps raw payloads available, but the primary experience is the Cortex command log and investigation timeline.</p>
+        <p className="muted-text">The UI keeps raw payloads available, but the primary experience is the Agent Actions Log and investigation timeline.</p>
       </div>
 
       <div className="panel span-2 sre-playbook-panel">
@@ -879,7 +928,7 @@ function HowItWorksPage() {
           </div>
           <div>
             <strong>Teach the system</strong>
-            <p>Approve only accurate root causes and resolutions so pgvector memory improves future investigations.</p>
+            <p>Save only accurate root causes and resolutions so Long-term Memory improves future investigations.</p>
           </div>
         </div>
       </div>
@@ -966,16 +1015,18 @@ function IncidentsPage() {
       {error ? <p className="error-text">{error}</p> : null}
       <div className="incident-list">
         {data.items.map((incident) => (
-          <article key={incident.id} className="incident-row">
+          <article key={incident.id} className="incident-row" data-severity={incident.severity?.toLowerCase()}>
             <Link className="incident-main-link" to={`/incidents/${incident.id}`}>
-              <div>
-                <strong>{incident.summary || incident.fingerprint}</strong>
-                <p>{incident.grouping_key.slice(0, 18)}... last seen {formatDate(incident.last_seen_at)}</p>
+              <div className="incident-title-row">
+                <SeverityChip severity={incident.severity} />
+                <div>
+                  <strong>{incident.summary || incident.fingerprint}</strong>
+                  <p>{elapsedLabelFrom(incident.first_seen_at || incident.last_seen_at)} active - {incident.grouping_key.slice(0, 18)}...</p>
+                </div>
               </div>
             </Link>
             <div className="incident-meta">
               <span>{incident.alert_count} alerts</span>
-              <SeverityChip severity={incident.severity} />
               <StatusChip status={incident.status} />
               <button
                 type="button"
@@ -988,7 +1039,7 @@ function IncidentsPage() {
             </div>
           </article>
         ))}
-        {!data.items.length && !error ? <EmptyState title="No matching incidents" copy="Adjust the filters or generate a sample alert from the workflow page." /> : null}
+        {!data.items.length && !error ? <EmptyState title="No incidents yet" body="Alerts from Alertmanager will appear here once received." action={<Link to="/integrations" className="ghost-button small-button">Configure Integrations</Link>} /> : null}
       </div>
     </section>
   );
@@ -1014,8 +1065,8 @@ function CortexCommandPanel({ workflowSummary, trace, report }) {
     <div className="panel span-2 cortex-command-panel">
       <div className="panel-header">
         <div>
-          <p className="eyebrow">Cortex command log</p>
-          <h3>Supervisor brain and agent responses</h3>
+          <p className="eyebrow">Agent Actions Log</p>
+          <h3>Agent Actions Log</h3>
         </div>
         <span className="count-pill">{workflowSummary?.actions?.length || 0} actions</span>
       </div>
@@ -1039,7 +1090,7 @@ function CortexCommandPanel({ workflowSummary, trace, report }) {
         </div>
       </div>
 
-      {supervisorFinal ? <JsonBlock title="Supervisor final decision" data={supervisorFinal} /> : null}
+      {supervisorFinal ? <pre>{JSON.stringify(safeJson(supervisorFinal), null, 2)}</pre> : null}
 
       <div className="agent-ledger-grid">
         {agents.map((agent) => {
@@ -1064,9 +1115,9 @@ function CortexCommandPanel({ workflowSummary, trace, report }) {
                         <small>{formatDate(action.at)}</small>
                       </summary>
                       <p>{actionPreview(action)}</p>
-                      {action.details?.recommended_actions?.length ? <JsonBlock title="Recommended actions" data={action.details.recommended_actions} /> : null}
-                      {action.details?.llm_trace ? <JsonBlock title="LLM trace" data={action.details.llm_trace} /> : null}
-                      {action.details ? <JsonBlock title="Raw action detail" data={safeJson(action.details)} /> : null}
+                      {action.details?.recommended_actions?.length ? <pre>{JSON.stringify(safeJson(action.details.recommended_actions), null, 2)}</pre> : null}
+                      {action.details?.llm_trace ? <pre>{JSON.stringify(safeJson(action.details.llm_trace), null, 2)}</pre> : null}
+                      {action.details ? <pre>{JSON.stringify(safeJson(action.details), null, 2)}</pre> : null}
                     </details>
                   ))}
                 </div>
@@ -1176,8 +1227,8 @@ function SupervisorChatPanel({ incidentId, incident, busy, onBusyChange, onError
                   <div className="incident-meta">
                     <StatusChip status={item.confidence || 'unknown'} />
                   </div>
-                  {!!item.next_actions?.length && <JsonBlock title="Action plan" data={item.next_actions} />}
-                  <JsonBlock title="What each agent did" data={item.agent_summary || {}} />
+                  {!!item.next_actions?.length && <pre>{JSON.stringify(safeJson(item.next_actions), null, 2)}</pre>}
+                  <pre>{JSON.stringify(safeJson(item.agent_summary || {}), null, 2)}</pre>
                 </div>
               ) : null}
             </article>
@@ -1212,6 +1263,7 @@ function IncidentDetailPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [activeTab, setActiveTab] = useState('overview');
 
   const load = async () => {
     try {
@@ -1250,6 +1302,8 @@ function IncidentDetailPage() {
     load();
   }, [incidentId]);
 
+  useEffect(() => { setActiveTab('overview'); }, [incidentId]);
+
   useEffect(() => {
     if (!incident || incident.status !== 'investigating') return undefined;
     let cancelled = false;
@@ -1271,6 +1325,8 @@ function IncidentDetailPage() {
       window.clearInterval(timer);
     };
   }, [incident?.status, incidentId]);
+
+  const elapsedLabel = useMemo(() => elapsedLabelFrom(incident?.first_seen_at), [incident?.first_seen_at]);
 
   const act = async (path, body) => {
     setBusy(true);
@@ -1331,146 +1387,140 @@ function IncidentDetailPage() {
     return <section className="panel">{error ? <p className="error-text">{error}</p> : <p>Loading incident...</p>}</section>;
   }
 
+  const timelineEvents = incident.timeline || [];
+  const DETAIL_TABS = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'timeline', label: 'Timeline', count: timelineEvents.length || 0 },
+    { id: 'analysis', label: 'Analysis' },
+    { id: 'actions', label: 'Actions' },
+    { id: 'report', label: 'Report' },
+  ];
+
   return (
     <section className="page-grid detail-grid">
-      <div className="panel span-2">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Cortex incident</p>
-            <h3>{incident.summary || incident.fingerprint}</h3>
+      <div className="span-2 incident-detail-header">
+        <div className="incident-detail-title-row">
+          <SeverityChip severity={incident.severity} />
+          <h2 className="incident-detail-title">{incident.alert_name || incident.summary || 'Incident'}</h2>
+          <StatusChip status={incident.status} />
+        </div>
+        <div className="incident-detail-meta-row">
+          <span className="meta-item"><span className="eyebrow">Service</span><strong>{incident.service || incidentServiceName(incident) || '—'}</strong></span>
+          <span className="meta-item"><span className="eyebrow">Started</span><strong>{formatDate(incident.first_seen_at)}</strong></span>
+          <span className="meta-item"><span className="eyebrow">Duration</span><strong>{elapsedLabel}</strong></span>
+          <span className="meta-item"><span className="eyebrow">Alerts</span><strong>{incident.alert_count || 0}</strong></span>
+        </div>
+        {['open', 'investigating', 'mitigating'].includes(incident.status) && (
+          <div className="urgency-banner">
+            <span className="pulse-dot" />
+            Active incident — Cortex is monitoring. Use War Room for live AI assistance.
           </div>
-          <div className="incident-meta">
-            <SeverityChip severity={incident.severity} />
-            <StatusChip status={incident.status} />
-          </div>
-        </div>
-        <div className="detail-meta-grid">
-          <div><strong>Fingerprint</strong><p>{incident.fingerprint}</p></div>
-          <div><strong>Grouping key</strong><p>{incident.grouping_key}</p></div>
-          <div><strong>First seen</strong><p>{formatDate(incident.first_seen_at)}</p></div>
-          <div><strong>Last seen</strong><p>{formatDate(incident.last_seen_at)}</p></div>
-          <div><strong>SLA deadline</strong><p>{incident.sla_deadline ? formatDate(incident.sla_deadline) : 'n/a'}</p></div>
-          <div><strong>MTTR</strong><p>{incident.mttr_seconds ?? 'n/a'}s</p></div>
-        </div>
-        <div className="action-row wrap">
-          <button disabled={busy} onClick={() => act('/supervisor/analyze', { incident_id: incident.id })}>Ask Cortex Supervisor</button>
-          <button disabled={busy} onClick={() => act('/supervisor/investigate', { incident_id: incident.id, reason: 'Investigate from UI' })}>Investigate</button>
-          <button disabled={busy} onClick={() => act('/supervisor/mitigate', { incident_id: incident.id, reason: 'Mitigate from UI' })}>Mitigate</button>
-          <button disabled={busy} onClick={() => act('/supervisor/resolve', { incident_id: incident.id, reason: 'Resolve from UI' })}>Resolve</button>
-          <button disabled={busy} onClick={() => act(`/report/${incident.id}`, {})}>Generate Cortex Report</button>
-          <button disabled={busy} onClick={() => setApproveOpen(true)}>Approve & Learn</button>
-          <button className="danger-button" disabled={busy} onClick={deleteCurrentIncident}>Delete Incident</button>
-          <button className="ghost-button" onClick={() => navigate('/incidents')}>Back</button>
-        </div>
-        {message ? <pre>{message}</pre> : null}
-        {error ? <p className="error-text">{error}</p> : null}
-      </div>
-
-      <CortexCommandPanel workflowSummary={workflowSummary} trace={reactTrace} report={report} />
-
-      <SupervisorChatPanel
-        incidentId={incident.id}
-        incident={incident}
-        busy={busy}
-        onBusyChange={setBusy}
-        onError={setError}
-        onAfterChat={load}
-      />
-
-      <ReActTracePanel trace={reactTrace} loading={traceLoading} />
-
-      <SimilarIncidentsPanel similar={similarIncidents} />
-
-      <IncidentIntegrationsPanel incident={incident} />
-
-      {approveOpen ? (
-        <ApproveLearnModal
-          incident={incident}
-          trace={reactTrace}
-          report={report}
-          onClose={() => setApproveOpen(false)}
-          onSaved={load}
-        />
-      ) : null}
-
-      <div className="panel">
-        <div className="panel-header">
-          <h3>Raw alert samples</h3>
-          <span>{incident.alerts.length} loaded</span>
-        </div>
-        <div className="stack-list">
-          {incident.alerts.map((alert) => (
-            <article key={alert.id} className="stack-item">
-              <div className="incident-meta">
-                <SeverityChip severity={alert.severity} />
-                <span>{alert.source || 'unknown source'}</span>
-              </div>
-              <strong>{alert.event_key}</strong>
-              <p>{formatDate(alert.created_at)}</p>
-              <pre>{JSON.stringify(alert.payload, null, 2)}</pre>
-            </article>
-          ))}
-          {!incident.alerts.length ? <EmptyState title="No alert samples loaded" copy="This incident detail request returned no alert payloads." /> : null}
-        </div>
-      </div>
-
-      <div className="panel">
-        <div className="panel-header">
-          <h3>Correlation stub</h3>
-          <span>{correlationNodes.length} nodes</span>
-        </div>
-        <div className="stack-list">
-          {correlationNodes.map((node) => (
-            <article key={node.id} className="stack-item">
-              <strong>{node.label}</strong>
-              <p>{node.id}</p>
-            </article>
-          ))}
-        </div>
-      </div>
-
-      <InvestigationTimeline events={incident.timeline} busy={busy} onDeleteEvent={deleteEvent} />
-
-      <div className="panel span-2">
-        <div className="panel-header">
-          <h3>Latest report</h3>
-          <span>{report ? 'stored' : 'not generated yet'}</span>
-        </div>
-        {report ? <pre>{report.report_event.report}</pre> : <p>No report event exists for this incident yet.</p>}
-      </div>
-
-      <div className="panel span-2">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Cortex report</p>
-            <h3>All agent actions and channel delivery</h3>
-          </div>
-          <span>{workflowSummary?.actions?.length || 0} actions</span>
-        </div>
-        {workflowSummary ? (
-          <div className="stack-list">
-            <div className="timeline-grid">
-              {workflowSummary.actions.map((action) => (
-                <article key={`${action.sequence}-${action.event_type}`} className="timeline-item">
-                  <div className="timeline-meta">
-                    <strong>{action.agent}</strong>
-                    <span>{action.event_type}</span>
-                    <span>{formatDate(action.at)}</span>
-                  </div>
-                  <p>{action.action}</p>
-                </article>
-              ))}
-            </div>
-            <JsonBlock title="Delivery records" data={workflowSummary.deliveries || []} />
-            <details className="json-viewer" open>
-              <summary>Copyable markdown summary</summary>
-              <pre>{workflowSummary.markdown}</pre>
-            </details>
-          </div>
-        ) : (
-          <p>No agent activity summary is available yet.</p>
         )}
       </div>
+
+      <div className="span-2 tab-nav">
+        {DETAIL_TABS.map((tab) => (
+          <button key={tab.id} type="button" className={`tab-btn ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
+            {tab.label}
+            {tab.count > 0 && <span className="tab-count">{tab.count}</span>}
+          </button>
+        ))}
+      </div>
+
+      {message ? <pre className="span-2">{message}</pre> : null}
+      {error ? <p className="error-text span-2">{error}</p> : null}
+
+      {activeTab === 'overview' && (
+        <>
+          <div className="panel">
+            <div className="panel-header"><h3>Incident Metadata</h3></div>
+            <div className="detail-meta-grid">
+              <div><strong>Deduplication Key</strong><p>{incident.fingerprint}</p></div>
+              <div><strong>Grouping key</strong><p>{incident.grouping_key}</p></div>
+              <div><strong>First seen</strong><p>{formatDate(incident.first_seen_at)}</p></div>
+              <div><strong>Last seen</strong><p>{formatDate(incident.last_seen_at)}</p></div>
+              <div><strong>SLA deadline</strong><p>{incident.sla_deadline ? formatDate(incident.sla_deadline) : 'n/a'}</p></div>
+              <div><strong>MTTR</strong><p>{incident.mttr_seconds ?? 'n/a'}s</p></div>
+            </div>
+          </div>
+          <div className="panel">
+            <div className="panel-header"><h3>Alert Samples</h3><span className="count-pill">{incident.alerts?.length}</span></div>
+            <table className="data-table">
+              <thead><tr><th>Alert</th><th>Severity</th><th>Service</th><th>Time</th></tr></thead>
+              <tbody>
+                {(incident.alerts || []).slice(0, 5).map((alert, index) => {
+                  const labels = alert.labels || alert.payload?.labels || {};
+                  return (
+                    <tr key={alert.id || index}>
+                      <td>{alert.alert_name || labels.alertname || alert.event_key || '—'}</td>
+                      <td><SeverityChip severity={alert.severity || labels.severity} /></td>
+                      <td className="muted-text">{labels.job || labels.service || '—'}</td>
+                      <td className="muted-text">{formatDate(alert.starts_at || alert.created_at)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {incident.alerts?.length > 5 && <p className="muted-text" style={{ padding: '.5rem 1rem', fontSize: '.85rem' }}>+{incident.alerts.length - 5} more alerts</p>}
+          </div>
+          <SimilarIncidentsPanel similar={similarIncidents} />
+        </>
+      )}
+
+      {activeTab === 'timeline' && (
+        <InvestigationTimeline events={incident.timeline} busy={busy} onDeleteEvent={deleteEvent} />
+      )}
+
+      {activeTab === 'analysis' && (
+        <>
+          <ReActTracePanel trace={reactTrace} loading={traceLoading} />
+          <CortexCommandPanel workflowSummary={workflowSummary} trace={reactTrace} report={report} />
+          <IncidentIntegrationsPanel incident={incident} />
+        </>
+      )}
+
+      {activeTab === 'actions' && (
+        <>
+          <div className="panel span-2">
+            <div className="panel-header"><h3>Actions</h3><button className="ghost-button" onClick={() => navigate('/incidents')}>Back</button></div>
+            <div className="action-row wrap">
+              <button disabled={busy} onClick={() => act('/supervisor/analyze', { incident_id: incident.id })}>Ask AI</button>
+              <button disabled={busy} onClick={() => act('/supervisor/investigate', { incident_id: incident.id, reason: 'Investigate from UI' })}>Investigate</button>
+              <button disabled={busy} onClick={() => act('/supervisor/mitigate', { incident_id: incident.id, reason: 'Mitigate from UI' })}>Mitigate</button>
+              <button disabled={busy} onClick={() => act('/supervisor/resolve', { incident_id: incident.id, reason: 'Resolve from UI' })}>Resolve</button>
+              <button disabled={busy} onClick={() => act(`/report/${incident.id}`, {})}>Generate Cortex Report</button>
+              <button disabled={busy} onClick={() => setApproveOpen(true)}>Save to Memory</button>
+              <button className="danger-button" disabled={busy} onClick={deleteCurrentIncident}>Delete Incident</button>
+            </div>
+          </div>
+          <div className="panel span-2">
+            <div className="panel-header"><h3>Related Signals</h3><span>{correlationNodes.length} nodes</span></div>
+            <div className="stack-list">
+              {correlationNodes.map((node) => (
+                <article key={node.id} className="stack-item"><strong>{node.label}</strong><p>{node.id}</p></article>
+              ))}
+            </div>
+          </div>
+          <SupervisorChatPanel incidentId={incident.id} incident={incident} busy={busy} onBusyChange={setBusy} onError={setError} onAfterChat={load} />
+        </>
+      )}
+
+      {activeTab === 'report' && (
+        <>
+          <div className="panel span-2">
+            <div className="panel-header"><h3>Latest report</h3><button disabled={busy} onClick={() => act(`/report/${incident.id}`, {})}>Generate Report</button></div>
+            {report ? <pre>{report.report_event.report}</pre> : <EmptyState title="No report generated yet" body="Run an investigation, then click Generate Report." />}
+          </div>
+          <div className="panel span-2">
+            <div className="panel-header"><h3>All agent actions and channel delivery</h3><span>{workflowSummary?.actions?.length || 0} actions</span></div>
+            {workflowSummary ? <pre>{workflowSummary.markdown}</pre> : <p>No agent activity summary is available yet.</p>}
+          </div>
+        </>
+      )}
+
+      {approveOpen ? (
+        <ApproveLearnModal incident={incident} trace={reactTrace} report={report} onClose={() => setApproveOpen(false)} onSaved={load} />
+      ) : null}
     </section>
   );
 }
@@ -1485,7 +1535,10 @@ function WarRoomPage() {
   const [error, setError] = useState('');
   const [showLogs, setShowLogs] = useState(false);
   const [showIncidents, setShowIncidents] = useState(false);
+  const [lastAssistantResponse, setLastAssistantResponse] = useState(null);
   const threadRef = useRef(null);
+  const selectedIncident = incidents[0] || null;
+  const selectedIncidentId = selectedIncident?.id;
 
   useEffect(() => {
     if (threadRef.current) {
@@ -1536,11 +1589,13 @@ function WarRoomPage() {
       }
 
       setIncidents(result.incidents || []);
+      setLastAssistantResponse(result);
       setMessages((prev) => prev.map((msg) => (msg.id === loadingId ? {
         id: `a-${Date.now()}`,
         role: 'assistant',
         content: result.answer || 'No answer returned.',
         confidence: result.confidence,
+        needs_human: result.needs_human,
         next_actions: result.next_actions || [],
         tool_calls: result.tool_calls || [],
       } : msg)));
@@ -1559,6 +1614,7 @@ function WarRoomPage() {
   const clearSession = () => {
     setMessages([]);
     setIncidents([]);
+    setLastAssistantResponse(null);
     setSessionId(null);
     window.sessionStorage.removeItem('cortex-war-room-session');
   };
@@ -1586,9 +1642,11 @@ function WarRoomPage() {
       {showIncidents && incidents.length > 0 && (
         <div className="war-room-scope">
           {incidents.map((incident) => (
-            <span key={incident.id} className={`status-chip status-${incident.status}`}>
-              {incident.summary || incident.id} - {incident.severity}
-            </span>
+            <div key={incident.id} className="war-room-incident-badge">
+              <SeverityChip severity={incident.severity} />
+              <span className="war-room-incident-name">{incident.alert_name || incident.summary || incident.id}</span>
+              <StatusChip status={incident.status} />
+            </div>
           ))}
         </div>
       )}
@@ -1608,12 +1666,19 @@ function WarRoomPage() {
           </div>
 
           <div className="chat-composer">
+            {lastAssistantResponse?.needs_human && (
+              <div className="human-review-prompt">
+                <span>⚠️</span>
+                <span>Cortex flagged this for human review - please verify before taking action.</span>
+                {selectedIncidentId ? <Link to={`/incidents/${selectedIncidentId}`} className="ghost-button small-button">Open Incident →</Link> : null}
+              </div>
+            )}
             {error && <p className="error-text">{error}</p>}
             <textarea
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
               onKeyDown={handleKey}
-              placeholder="e.g. Which service is causing the most alerts right now?"
+              placeholder="Ask Cortex about this incident... (e.g. What's causing the error spike?)"
               rows={3}
               disabled={busy}
             />
@@ -1622,7 +1687,7 @@ function WarRoomPage() {
                 Ctrl+Enter to send
               </span>
               <button type="button" onClick={sendQuestion} disabled={busy || question.trim().length < 3}>
-                {busy ? 'Investigating...' : 'Ask Supervisor'}
+                {busy ? 'Investigating...' : 'Ask AI'}
               </button>
             </div>
           </div>
@@ -1648,6 +1713,13 @@ function WarRoomPage() {
 }
 
 function WarRoomMessage({ msg }) {
+  const confidenceValue = typeof msg.confidence === 'number'
+    ? msg.confidence
+    : ({ high: 0.9, moderate: 0.6, medium: 0.6, low: 0.3 }[String(msg.confidence || '').toLowerCase()] ?? Number(msg.confidence));
+  const hasConfidence = Number.isFinite(confidenceValue);
+  const confidenceClass = confidenceValue >= 0.8 ? 'high' : confidenceValue >= 0.5 ? 'moderate' : 'low';
+  const confidenceLabel = confidenceValue >= 0.8 ? 'High Confidence' : confidenceValue >= 0.5 ? 'Moderate' : 'Low Confidence';
+
   if (msg.role === 'loading') {
     return (
       <div className="chat-bubble assistant">
@@ -1666,9 +1738,13 @@ function WarRoomMessage({ msg }) {
     <article className="chat-bubble assistant">
       <div className="chat-meta">
         <strong>Cortex Supervisor</strong>
-        {msg.confidence && <StatusChip status={msg.confidence} />}
       </div>
       <p style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+      {hasConfidence && (
+        <span className={`confidence-badge ${confidenceClass}`}>
+          {confidenceLabel}
+        </span>
+      )}
 
       {msg.tool_calls?.length > 0 && (
         <details className="tool-calls-summary">
@@ -1829,6 +1905,23 @@ function AgentsPage() {
   }, []);
 
   const okCount = health.filter((item) => item.status === 'ok').length;
+  const allHealthy = health.length > 0 && health.every((item) => item.status === 'ok');
+  const renderHealthRows = (names) => names.map((name) => {
+    const item = health.find((entry) => entry.service === name) || { service: name, status: 'pending', readiness: 'waiting for check' };
+    const ok = item.status === 'ok';
+    return (
+      <div key={name} className="agent-status-row">
+        <span className={`status-dot ${ok ? 'ok' : 'error'}`} />
+        <div>
+          <span className="agent-status-name">{item.service}</span>
+          <p className="eyebrow">{names.includes('prometheus') ? 'Infrastructure' : 'AI Agent'}</p>
+        </div>
+        <span className={`agent-status-value ${ok ? 'success-text' : 'error-text'}`}>
+          {ok ? 'Healthy' : item.readiness || 'Unavailable'}
+        </span>
+      </div>
+    );
+  });
 
   return (
     <section className="page-grid">
@@ -1836,7 +1929,7 @@ function AgentsPage() {
         <div className="hero-copy">
           <p className="eyebrow">Fleet readiness</p>
           <h3>Docker compose node health</h3>
-          <p>Health checks cover app agents plus Prometheus, Alertmanager, Grafana, Redis-backed ReAct memory dependencies, and node-exporter reachability.</p>
+          <p>Health checks cover app agents plus Prometheus, Alertmanager, Grafana, Redis-backed AI reasoning memory dependencies, and node-exporter reachability.</p>
         </div>
         <div className="ops-strip">
           <span><strong>{okCount}/{health.length || nodes.length}</strong><small>healthy</small></span>
@@ -1844,26 +1937,26 @@ function AgentsPage() {
         </div>
       </div>
       {error ? <p className="error-text">{error}</p> : null}
-      <div className="health-grid span-2">
-        {health.map((item) => (
-          <article key={item.service} className="health-card">
-            <div className="panel-header compact">
-              <div>
-                <p className="eyebrow">{item.service}</p>
-                <h4>{item.status}</h4>
-              </div>
-              <StatusChip status={item.status} />
+      <div className="panel span-2">
+        <div className="panel-header">
+          <h3>System Status</h3>
+          <span className={`status-chip ${allHealthy ? 'status-resolved' : 'status-investigating'}`}>
+            {allHealthy ? 'All Operational' : 'Degraded'}
+          </span>
+        </div>
+        {!health.length && !error ? <EmptyState title="Loading health checks" body="Waiting for compose node endpoints." /> : null}
+        {health.length ? (
+          <>
+            <p className="eyebrow" style={{ padding: '0 0 .5rem 0' }}>AI Agents</p>
+            <div className="agent-status-list">
+              {renderHealthRows(['history-agent', 'supervisor-agent', 'observability-agent', 'repo-agent', 'report-agent'])}
             </div>
-            <p>Database: {item.database}</p>
-            <p>Readiness: {item.readiness}</p>
-            <p>{formatDate(item.timestamp)}</p>
-            <details className="json-viewer">
-              <summary>Raw detail</summary>
-              <pre>{typeof item.detail === 'string' ? item.detail : JSON.stringify(item.detail, null, 2)}</pre>
-            </details>
-          </article>
-        ))}
-        {!health.length && !error ? <EmptyState title="Loading health checks" copy="Waiting for compose node endpoints." /> : null}
+            <p className="eyebrow" style={{ padding: '1rem 0 .5rem 0' }}>Infrastructure</p>
+            <div className="agent-status-list">
+              {renderHealthRows(['prometheus', 'alertmanager', 'grafana', 'node-exporter'])}
+            </div>
+          </>
+        ) : null}
       </div>
     </section>
   );
@@ -2118,7 +2211,7 @@ function PlatformIntegrationSettings() {
         </label>
         <label>
           Metrics datasource
-          <span className="field-hint">Default backend for PromQL queries used by observability-agent.</span>
+          <span className="field-hint">Default backend for Metrics Query queries used by observability-agent.</span>
           <select value={observability.metrics_datasource || 'prometheus'} onChange={(event) => setObservability((current) => ({ ...current, metrics_datasource: event.target.value }))}>
             <option value="prometheus">Prometheus</option>
             <option value="victoriametrics">VictoriaMetrics</option>
@@ -2650,6 +2743,7 @@ function SettingsPage() {
   const [testResults, setTestResults] = useState({});
   const [secretStatus, setSecretStatus] = useState({});
   const [secretDraft, setSecretDraft] = useState({});
+  const [settingsTab, setSettingsTab] = useState('models');
 
   const load = async () => {
     setError('');
@@ -2751,6 +2845,11 @@ function SettingsPage() {
   }
 
   const agents = Object.keys(draft.agents || {});
+  const SETTINGS_TABS = [
+    { id: 'models', label: 'AI Models' },
+    { id: 'connections', label: 'Connections' },
+    { id: 'secrets', label: 'Secrets' },
+  ];
 
   return (
     <section className="page-grid">
@@ -2765,7 +2864,20 @@ function SettingsPage() {
         </div>
       </div>
 
-      {agents.map((agent) => {
+      <div className="tab-nav span-2">
+        {SETTINGS_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className={`tab-btn ${settingsTab === tab.id ? 'active' : ''}`}
+            onClick={() => setSettingsTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {settingsTab === 'models' && agents.map((agent) => {
         const selection = draft.agents[agent];
         const models = draft.models[selection.provider] || [];
         const result = testResults[agent];
@@ -2815,7 +2927,7 @@ function SettingsPage() {
         );
       })}
 
-      <div className="panel span-2">
+      {settingsTab === 'connections' && <div className="panel span-2">
         <div className="panel-header">
           <div>
             <p className="eyebrow">Provider networking</p>
@@ -2855,15 +2967,18 @@ function SettingsPage() {
             </div>
           ))}
         </div>
-      </div>
+      </div>}
 
-      <div className="panel span-2">
+      {settingsTab === 'secrets' && <div className="panel span-2">
         <div className="panel-header">
           <div>
             <p className="eyebrow">Secrets</p>
             <h3>Runtime API keys</h3>
           </div>
           <button type="button" className="ghost-button" onClick={saveSecrets}>Save API Keys</button>
+        </div>
+        <div style={{ padding: '.875rem 1.25rem', background: 'var(--warning-soft)', border: '1px solid var(--warning)', borderRadius: 'var(--radius-md)', marginBottom: '1rem', color: 'var(--warning)', fontWeight: 600, fontSize: '.875rem' }}>
+          🔒 API keys are stored in your environment and never logged or transmitted beyond your server.
         </div>
         <p>Keys are written to the ignored runtime secret store and never displayed after save. Leave a field blank to keep the current value.</p>
         <div className="secret-grid">
@@ -2886,7 +3001,7 @@ function SettingsPage() {
             );
           })}
         </div>
-      </div>
+      </div>}
 
       <div className="panel span-2">
         <div className="panel-header">
