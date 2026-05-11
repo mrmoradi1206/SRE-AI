@@ -3409,3 +3409,157 @@ button.danger-button {
   color: #ffffff;
   background: linear-gradient(135deg, #0ea5e9, #4f46e5 58%, #14b8a6);
 }
+
+/* Cortex Daylight: calm light theme, inspired by dark mode */
+:root:not([data-theme="dark"]) {
+  --bg: #d7dee9;
+  --bg-deep: #eef3f8;
+  --panel: rgba(244, 248, 252, 0.88);
+  --panel-strong: rgba(248, 251, 254, 0.96);
+  --ink: #101827;
+  --muted: #536175;
+  --border: rgba(29, 45, 68, 0.14);
+  --shadow: 0 18px 52px rgba(22, 38, 58, 0.12), 0 1px 0 rgba(255, 255, 255, 0.75) inset;
+  --accent: #0f8fb8;
+  --accent-strong: #07556f;
+  --accent-soft: rgba(15, 143, 184, 0.10);
+  --violet: #3b5bdb;
+  --neon: #0f9f7a;
+  --surface-text: #101827;
+  --surface-muted: #536175;
+  --surface-faint: #6f7e91;
+  --surface-tint: rgba(234, 241, 248, 0.84);
+  --surface-tint-strong: rgba(248, 251, 254, 0.96);
+}
+
+:root:not([data-theme="dark"]) body {
+  background:
+    radial-gradient(circle at 18% 8%, rgba(15, 143, 184, 0.16), transparent 28rem),
+    radial-gradient(circle at 86% 10%, rgba(59, 91, 219, 0.10), transparent 26rem),
+    radial-gradient(circle at 50% 115%, rgba(15, 159, 122, 0.10), transparent 30rem),
+    linear-gradient(135deg, #d7dee9 0%, #edf3f8 54%, #dde8ef 100%);
+}
+
+:root:not([data-theme="dark"]) .content {
+  background:
+    linear-gradient(90deg, rgba(29, 45, 68, 0.035) 1px, transparent 1px),
+    linear-gradient(rgba(29, 45, 68, 0.035) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+:root:not([data-theme="dark"]) .sidebar {
+  background:
+    radial-gradient(circle at 15% 0%, rgba(15, 143, 184, 0.13), transparent 15rem),
+    linear-gradient(180deg, rgba(248, 251, 254, 0.95), rgba(232, 239, 247, 0.92));
+  border-right-color: rgba(29, 45, 68, 0.16);
+  box-shadow: 16px 0 50px rgba(22, 38, 58, 0.10);
+}
+
+:root:not([data-theme="dark"]) .topbar {
+  background: rgba(238, 244, 249, 0.82);
+  border-bottom-color: rgba(29, 45, 68, 0.12);
+}
+
+:root:not([data-theme="dark"]) .brand-card {
+  background:
+    linear-gradient(135deg, rgba(15, 143, 184, 0.11), rgba(59, 91, 219, 0.06)),
+    rgba(248, 251, 254, 0.72);
+  border-color: rgba(15, 143, 184, 0.18);
+  box-shadow: 0 14px 34px rgba(22, 38, 58, 0.09);
+}
+
+:root:not([data-theme="dark"]) .brand-mark,
+:root:not([data-theme="dark"]) button:not(.ghost-button),
+:root:not([data-theme="dark"]) .chat-bubble.user {
+  background: linear-gradient(135deg, #0f8fb8, #3b5bdb);
+}
+
+:root:not([data-theme="dark"]) .hero-card {
+  background:
+    radial-gradient(circle at 88% 12%, rgba(15, 143, 184, 0.15), transparent 18rem),
+    linear-gradient(135deg, rgba(248, 251, 254, 0.92), rgba(229, 237, 246, 0.86));
+  color: var(--ink);
+}
+
+:root:not([data-theme="dark"]) .panel,
+:root:not([data-theme="dark"]) .metric-card,
+:root:not([data-theme="dark"]) .copy-card,
+:root:not([data-theme="dark"]) .health-card,
+:root:not([data-theme="dark"]) .prompt-card,
+:root:not([data-theme="dark"]) .integration-card,
+:root:not([data-theme="dark"]) .llm-agent-card,
+:root:not([data-theme="dark"]) .empty-state,
+:root:not([data-theme="dark"]) .incident-row,
+:root:not([data-theme="dark"]) .stack-item,
+:root:not([data-theme="dark"]) .timeline-item,
+:root:not([data-theme="dark"]) .cot-step,
+:root:not([data-theme="dark"]) .chat-bubble.assistant,
+:root:not([data-theme="dark"]) .war-room-logs,
+:root:not([data-theme="dark"]) .incident-detail-meta-row {
+  background:
+    linear-gradient(180deg, rgba(248, 251, 254, 0.94), rgba(235, 242, 248, 0.88));
+  border-color: rgba(29, 45, 68, 0.14);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+:root:not([data-theme="dark"]) .panel::before,
+:root:not([data-theme="dark"]) .metric-card::before {
+  background: linear-gradient(90deg, #0f8fb8, #3b5bdb, #0f9f7a);
+  opacity: 0.72;
+}
+
+:root:not([data-theme="dark"]) .metric-card:nth-child(n) {
+  background: linear-gradient(180deg, rgba(248, 251, 254, 0.95), rgba(232, 240, 247, 0.88));
+}
+
+:root:not([data-theme="dark"]) .sidebar nav a,
+:root:not([data-theme="dark"]) .nav-more-link {
+  color: #405066;
+}
+
+:root:not([data-theme="dark"]) .sidebar nav a:hover,
+:root:not([data-theme="dark"]) .sidebar nav a.active,
+:root:not([data-theme="dark"]) .nav-more-link:hover,
+:root:not([data-theme="dark"]) .nav-more-link.active {
+  background: rgba(15, 143, 184, 0.10);
+  color: var(--accent-strong);
+  border-color: rgba(15, 143, 184, 0.22);
+}
+
+:root:not([data-theme="dark"]) .tab-nav {
+  background: rgba(248, 251, 254, 0.68);
+  border-color: rgba(29, 45, 68, 0.14);
+}
+
+:root:not([data-theme="dark"]) .tab-btn {
+  color: #405066;
+}
+
+:root:not([data-theme="dark"]) .tab-btn:hover {
+  color: var(--accent-strong);
+  background: rgba(15, 143, 184, 0.08);
+}
+
+:root:not([data-theme="dark"]) .tab-btn.active {
+  color: #ffffff;
+  background: linear-gradient(135deg, #0f8fb8, #3b5bdb);
+  box-shadow: 0 12px 28px rgba(15, 143, 184, 0.20);
+}
+
+:root:not([data-theme="dark"]) input,
+:root:not([data-theme="dark"]) select,
+:root:not([data-theme="dark"]) textarea,
+:root:not([data-theme="dark"]) pre,
+:root:not([data-theme="dark"]) .quick-action-btn,
+:root:not([data-theme="dark"]) .json-viewer {
+  background: rgba(241, 246, 251, 0.86);
+  border-color: rgba(29, 45, 68, 0.14);
+  color: var(--ink);
+}
+
+:root:not([data-theme="dark"]) .quick-action-btn:hover {
+  background: rgba(15, 143, 184, 0.11);
+  color: var(--accent-strong);
+  border-color: rgba(15, 143, 184, 0.24);
+}
