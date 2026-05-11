@@ -2940,3 +2940,107 @@ pre {
     position: relative;
   }
 }
+
+/* Colorful light mode: never plain white */
+:root:not([data-theme="dark"]) {
+  --bg: #dbeafe;
+  --bg-deep: #f0fdfa;
+  --panel: rgba(239, 246, 255, 0.88);
+  --panel-strong: #e0f2fe;
+  --ink: #0f172a;
+  --muted: #475569;
+  --border: rgba(37, 99, 235, 0.18);
+  --shadow: 0 16px 44px rgba(37, 99, 235, 0.13), 0 2px 8px rgba(15, 23, 42, 0.08);
+  --accent: #2563eb;
+  --accent-strong: #1e40af;
+  --accent-soft: rgba(37, 99, 235, 0.13);
+  --violet: #7c3aed;
+  --neon: #059669;
+}
+
+:root:not([data-theme="dark"]) body {
+  background:
+    radial-gradient(circle at 16% 8%, rgba(37, 99, 235, 0.22), transparent 28rem),
+    radial-gradient(circle at 88% 12%, rgba(124, 58, 237, 0.18), transparent 25rem),
+    radial-gradient(circle at 46% 105%, rgba(5, 150, 105, 0.18), transparent 27rem),
+    linear-gradient(135deg, var(--bg) 0%, var(--bg-deep) 100%);
+}
+
+:root:not([data-theme="dark"]) .content {
+  background:
+    linear-gradient(90deg, rgba(37, 99, 235, 0.05) 1px, transparent 1px),
+    linear-gradient(rgba(37, 99, 235, 0.05) 1px, transparent 1px);
+  background-size: 52px 52px;
+}
+
+:root:not([data-theme="dark"]) .sidebar {
+  background:
+    radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.18), transparent 16rem),
+    linear-gradient(180deg, #dbeafe, #ede9fe 58%, #ccfbf1);
+  color: var(--ink);
+}
+
+:root:not([data-theme="dark"]) .topbar {
+  background: rgba(219, 234, 254, 0.82);
+}
+
+:root:not([data-theme="dark"]) .brand-card {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.18), rgba(124, 58, 237, 0.14));
+  border-color: rgba(37, 99, 235, 0.22);
+}
+
+:root:not([data-theme="dark"]) .hero-card {
+  background:
+    radial-gradient(circle at 90% 12%, rgba(37, 99, 235, 0.18), transparent 18rem),
+    linear-gradient(135deg, #dbeafe, #ede9fe 55%, #ccfbf1);
+}
+
+:root:not([data-theme="dark"]) .panel,
+:root:not([data-theme="dark"]) .metric-card,
+:root:not([data-theme="dark"]) .copy-card,
+:root:not([data-theme="dark"]) .health-card,
+:root:not([data-theme="dark"]) .prompt-card,
+:root:not([data-theme="dark"]) .integration-card,
+:root:not([data-theme="dark"]) .llm-agent-card,
+:root:not([data-theme="dark"]) .chat-bubble.assistant,
+:root:not([data-theme="dark"]) .empty-state,
+:root:not([data-theme="dark"]) .incident-row,
+:root:not([data-theme="dark"]) .stack-item,
+:root:not([data-theme="dark"]) .timeline-item,
+:root:not([data-theme="dark"]) .cot-step {
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.92), rgba(224, 242, 254, 0.84));
+  border-color: rgba(37, 99, 235, 0.18);
+}
+
+:root:not([data-theme="dark"]) .metric-card:nth-child(1) {
+  background: linear-gradient(180deg, rgba(254, 226, 226, 0.88), rgba(219, 234, 254, 0.82));
+}
+
+:root:not([data-theme="dark"]) .metric-card:nth-child(2) {
+  background: linear-gradient(180deg, rgba(254, 243, 199, 0.88), rgba(224, 242, 254, 0.82));
+}
+
+:root:not([data-theme="dark"]) .metric-card:nth-child(3) {
+  background: linear-gradient(180deg, rgba(224, 242, 254, 0.92), rgba(237, 233, 254, 0.82));
+}
+
+:root:not([data-theme="dark"]) .metric-card:nth-child(4) {
+  background: linear-gradient(180deg, rgba(209, 250, 229, 0.90), rgba(219, 234, 254, 0.82));
+}
+
+:root:not([data-theme="dark"]) .quick-action-btn,
+:root:not([data-theme="dark"]) input,
+:root:not([data-theme="dark"]) select,
+:root:not([data-theme="dark"]) textarea,
+:root:not([data-theme="dark"]) pre {
+  background: rgba(219, 234, 254, 0.72);
+  border-color: rgba(37, 99, 235, 0.18);
+}
+
+:root:not([data-theme="dark"]) .sidebar nav a:hover,
+:root:not([data-theme="dark"]) .sidebar nav a.active,
+:root:not([data-theme="dark"]) .nav-more-link:hover,
+:root:not([data-theme="dark"]) .nav-more-link.active {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.14), rgba(124, 58, 237, 0.12));
+  color: var(--accent-strong);
+}
