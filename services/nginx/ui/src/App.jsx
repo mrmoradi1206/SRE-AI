@@ -40,6 +40,7 @@ const MORE_NAV_ITEMS = [
   { to: '/workflow',     label: 'Test Workflow' },
   { to: '/how-it-works', label: 'How It Works' },
 ];
+const THEME_STORAGE_KEY = 'cortex-theme-v2';
 const OPS_SIGNALS = [
   ['99.95%', 'target SLO'],
   ['< 4h', 'default SLA'],
@@ -588,7 +589,7 @@ function SeverityChip({ severity }) {
 }
 
 function Shell({ children }) {
-  const [theme, setTheme] = useState(() => localStorage.getItem('sre-ai-theme') || 'light');
+  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_STORAGE_KEY) || 'dark');
   const location = useLocation();
   const PAGE_TITLES = {
     '/': { label: 'Dashboard', sub: 'Active incidents & system status' },
@@ -607,7 +608,7 @@ function Shell({ children }) {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem('sre-ai-theme', theme);
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
   }, [theme]);
 
   return (
