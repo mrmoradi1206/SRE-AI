@@ -110,60 +110,139 @@ class SupervisorAdvisor:
     async def query_observability(self, incident_bundle: dict, query: str | dict | None = None) -> dict:
         bundle = normalize_incident_bundle(incident_bundle)
         incident = bundle.get('incident', {})
+        alerts = bundle.get('alerts', [])
         incident_id = str(incident.get('id') or '')
         service = self._service_name(incident_bundle)
+
+        latest_alert = alerts[-1] if alerts else {}
+        latest_payload = latest_alert.get('payload', {}) if isinstance(latest_alert.get('payload'), dict) else {}
+        labels = latest_payload.get('labels', {}) if isinstance(latest_payload, dict) else {}
+
+        alert_name = labels.get('alertname', '')
+        severity = (labels.get('severity') or incident.get('severity') or 'unknown').lower()
+
+        first_seen_at = incident.get('first_seen_at') or incident.get('last_seen_at')
+        minutes = 60
+        if first_seen_at:
+            try:
+                from datetime import datetime, timezone
+
+                start = datetime.fromisoformat(str(first_seen_at).replace('Z', '+00:00'))
+                now = datetime.now(timezone.utc)
+                elapsed = int((now - start).total_seconds() / 60)
+                minutes = max(30, min(elapsed + 30, 360))
+            except Exception:
+                minutes = 60
+
         promql = query.get('promql') if isinstance(query, dict) else query
-        if not promql:
+        if not promql and alert_name:
+            alert_name_lower = alert_name.lower()
+            if any(keyword in alert_name_lower for keyword in ('latency', 'duration', 'p99', 'p95')):
+                promql = f'histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{{job=~"{service}.*"}}[5m]))'
+            elif any(keyword in alert_name_lower for keyword in ('error', 'fail', '5xx', '4xx')):
+                promql = f'rate(http_requests_total{{job=~"{service}.*",status=~"5.."}}[5m])'
+            elif any(keyword in alert_name_lower for keyword in ('memory', 'mem', 'heap', 'oom')):
+                promql = f'container_memory_working_set_bytes{{container=~"{service}.*"}}'
+            elif any(keyword in alert_name_lower for keyword in ('cpu',)):
+                promql = f'rate(container_cpu_usage_seconds_total{{container=~"{service}.*"}}[5m])'
+            else:
+                promql = f'up{{job=~"{service}.*"}}' if service and service != 'unknown' else 'up'
+        elif not promql:
             promql = f'up{{job=~"{service}.*"}}' if service and service != 'unknown' else 'up'
-        observations: dict[str, Any] = {'tool': 'query_observability', 'source': 'observability-agent', 'service': service}
+
+        observations: dict[str, Any] = {
+            'tool': 'query_observability',
+            'source': 'observability-agent',
+            'service': service,
+        }
         try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
+            async with httpx.AsyncClient(timeout=12.0) as client:
                 analysis_response = await client.post(
                     AGENT_REGISTRY['query_observability'].endpoint,
                     json={
                         'incident_id': incident_id,
                         'incident': incident,
-                        'alerts': bundle.get('alerts', []),
+                        'alerts': alerts[:10],
                         'service': service,
                         'promql': str(promql),
-                        'minutes': 60,
+                        'minutes': minutes,
+                        'alert_name': alert_name,
+                        'severity': severity,
+                        'alert_started_at': str(first_seen_at or ''),
                     },
                 )
                 analysis_response.raise_for_status()
                 observations['agent_response'] = analysis_response.json()
-            observations['summary'] = 'Collected observability-agent LLM analysis with Prometheus metrics and recent error-log context.'
+            observations['summary'] = (
+                f'Observability analysis for {service} '
+                f'(alert={alert_name}, window={minutes}min, severity={severity}).'
+            )
             return observations
         except Exception as exc:  # noqa: BLE001
             logger.warning('query_observability_failed', extra={'error_type': type(exc).__name__})
-            return {'tool': 'query_observability', 'source': 'error', 'service': service, 'error': type(exc).__name__, 'summary': 'Observability lookup failed; continue with incident context.'}
+            return {
+                'tool': 'query_observability',
+                'source': 'error',
+                'service': service,
+                'error': type(exc).__name__,
+                'summary': 'Observability lookup failed; continue with incident context.',
+            }
 
     async def query_repo_changes(self, incident_bundle: dict, query: str | dict | None = None) -> dict:
+        bundle = normalize_incident_bundle(incident_bundle)
+        incident = bundle.get('incident', {})
+        alerts = bundle.get('alerts', [])
+
         project_id = query.get('project_id') if isinstance(query, dict) else None
         ref = query.get('ref') if isinstance(query, dict) else None
-        params = {'days': 7, 'limit': 10}
+
+        first_seen_at = incident.get('first_seen_at') or incident.get('last_seen_at')
+        days = 2
+        alert_started_at = ''
+        if first_seen_at:
+            try:
+                from datetime import datetime, timezone
+
+                start = datetime.fromisoformat(str(first_seen_at).replace('Z', '+00:00'))
+                now = datetime.now(timezone.utc)
+                elapsed_days = (now - start).total_seconds() / 86400
+                days = max(1, min(int(elapsed_days) + 1, 7))
+                alert_started_at = start.isoformat()
+            except Exception:
+                days = 2
+
+        params: dict[str, Any] = {'days': days, 'limit': 10}
         if project_id:
             params['project_id'] = project_id
         if ref:
             params['ref'] = ref
+
         try:
-            bundle = normalize_incident_bundle(incident_bundle)
-            incident = bundle.get('incident', {})
-            async with httpx.AsyncClient(timeout=8.0) as client:
+            async with httpx.AsyncClient(timeout=12.0) as client:
                 response = await client.post(
                     AGENT_REGISTRY['query_repo_changes'].endpoint,
                     json={
                         'incident_id': str(incident.get('id') or ''),
                         'incident': incident,
-                        'alerts': bundle.get('alerts', []),
+                        'alerts': alerts[:10],
                         'service': self._service_name(incident_bundle),
+                        'alert_started_at': alert_started_at,
                         **params,
                     },
                 )
             response.raise_for_status()
-            return {'tool': 'query_repo_changes', 'source': 'repo-agent', **response.json()}
+            result = response.json()
+            result['tool'] = 'query_repo_changes'
+            result['source'] = 'repo-agent'
+            return result
         except Exception as exc:  # noqa: BLE001
             logger.warning('query_repo_changes_failed', extra={'error_type': type(exc).__name__})
-            return {'tool': 'query_repo_changes', 'source': 'error', 'error': type(exc).__name__, 'summary': 'Repo lookup failed or GitLab project is not configured.'}
+            return {
+                'tool': 'query_repo_changes',
+                'source': 'error',
+                'error': type(exc).__name__,
+                'summary': 'Repo lookup failed or GitLab project is not configured.',
+            }
 
     async def _run_action(self, incident_bundle: dict, action: dict[str, Any]) -> dict:
         name = action.get('name')

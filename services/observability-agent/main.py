@@ -170,24 +170,122 @@ async def test_elasticsearch() -> dict[str, Any]:
         return {'ok': False, 'elasticsearch_url': elasticsearch_url, 'index': index, 'error': str(exc)}
 
 
+def _parse_recommended_queries(analysis_content: str) -> list[str]:
+    try:
+        import json
+        import re
+
+        text = analysis_content.strip()
+        if text.startswith('```'):
+            text = re.sub(r'^```(?:json)?\s*', '', text, re.IGNORECASE)
+            text = re.sub(r'\s*```$', '', text)
+        parsed = json.loads(text)
+        queries = parsed.get('recommended_queries', [])
+        if isinstance(queries, list):
+            return [str(query) for query in queries[:3] if query]
+    except Exception:
+        pass
+    return []
+
+
 @app.post('/api/v1/analyze')
 async def analyze_observability(payload: ObservabilityAnalyzeRequest) -> dict[str, Any]:
+    prometheus_url, vm_url, metrics_datasource, elasticsearch_url, vm_enabled, index = _current_urls()
     evidence = await _collect_observability(payload)
+    selection = get_agent_llm_config('observability')
+
     try:
-        selection = get_agent_llm_config('observability')
-        response = await run_llm(
+        round1 = await run_llm(
             selection['provider'],
             selection['model'],
             [
                 {'role': 'system', 'content': get_agent_system_prompt('observability')},
-                {'role': 'user', 'content': _safe_json({'task': 'Analyze observability evidence and respond with strict JSON.', 'request': payload.model_dump(), 'evidence': evidence})},
+                {
+                    'role': 'user',
+                    'content': _safe_json(
+                        {
+                            'task': 'Analyze initial observability evidence. If you need more data, list PromQL queries in recommended_queries. Respond with strict JSON.',
+                            'request': payload.model_dump(),
+                            'evidence': evidence,
+                        }
+                    ),
+                },
             ],
             temperature=0.1,
             max_tokens=700,
         )
-        return {'status': 'ok', 'agent': 'observability-agent', 'provider': response['provider'], 'model': response['model'], 'analysis': response['content'], 'evidence': evidence, 'llm_trace': response.get('trace')}
+
+        follow_up_queries = _parse_recommended_queries(round1['content'])
+        additional_evidence: list[dict] = []
+        if follow_up_queries:
+            _, base_url = _metrics_target(prometheus_url, vm_url, metrics_datasource, None, vm_enabled)
+            import asyncio as _asyncio
+
+            async def _run_query(promql: str) -> dict:
+                try:
+                    data = await query_prometheus(promql, prometheus_url=base_url)
+                    return {'query': promql, 'status': 'ok', 'data': data.get('data', {})}
+                except Exception as exc:  # noqa: BLE001
+                    return {'query': promql, 'status': 'error', 'error': str(exc)}
+
+            additional_evidence = await _asyncio.gather(*[_run_query(query) for query in follow_up_queries])
+
+        if additional_evidence:
+            final_response = await run_llm(
+                selection['provider'],
+                selection['model'],
+                [
+                    {'role': 'system', 'content': get_agent_system_prompt('observability')},
+                    {
+                        'role': 'user',
+                        'content': _safe_json(
+                            {
+                                'task': 'Synthesize all observability evidence (initial + follow-up queries) into a final analysis. Respond with strict JSON.',
+                                'request': payload.model_dump(),
+                                'initial_evidence': evidence,
+                                'initial_analysis': round1['content'],
+                                'follow_up_evidence': list(additional_evidence),
+                            }
+                        ),
+                    },
+                ],
+                temperature=0.1,
+                max_tokens=800,
+            )
+            return {
+                'status': 'ok',
+                'agent': 'observability-agent',
+                'provider': final_response['provider'],
+                'model': final_response['model'],
+                'analysis': final_response['content'],
+                'evidence': evidence,
+                'follow_up_queries': follow_up_queries,
+                'follow_up_evidence': list(additional_evidence),
+                'rounds': 2,
+                'llm_trace': final_response.get('trace'),
+            }
+
+        return {
+            'status': 'ok',
+            'agent': 'observability-agent',
+            'provider': round1['provider'],
+            'model': round1['model'],
+            'analysis': round1['content'],
+            'evidence': evidence,
+            'follow_up_queries': [],
+            'rounds': 1,
+            'llm_trace': round1.get('trace'),
+        }
+
     except (LLMConfigError, LLMError) as exc:
-        return {'status': 'fallback', 'agent': 'observability-agent', 'analysis': 'LLM analysis unavailable; returning collected metrics/log evidence only.', 'error': str(exc), 'evidence': evidence}
+        return {
+            'status': 'fallback',
+            'agent': 'observability-agent',
+            'analysis': 'LLM analysis unavailable; returning collected metrics/log evidence only.',
+            'error': str(exc),
+            'evidence': evidence,
+            'rounds': 0,
+        }
 
 
 @app.post('/api/v1/query')
