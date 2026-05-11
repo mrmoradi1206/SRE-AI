@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, NavLink, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
 const PROVIDER_LABELS = {
@@ -589,6 +589,21 @@ function SeverityChip({ severity }) {
 
 function Shell({ children }) {
   const [theme, setTheme] = useState(() => localStorage.getItem('sre-ai-theme') || 'light');
+  const location = useLocation();
+  const PAGE_TITLES = {
+    '/': { label: 'Dashboard', sub: 'Active incidents & system status' },
+    '/incidents': { label: 'Incidents', sub: 'Triage queue & incident history' },
+    '/war-room': { label: 'War Room', sub: 'Live AI-assisted response' },
+    '/integrations': { label: 'Integrations', sub: 'Alertmanager, Prometheus, and data sources' },
+    '/settings': { label: 'Settings', sub: 'Models, prompts & API keys' },
+    '/agents': { label: 'System Health', sub: 'Agent and infrastructure status' },
+    '/workflow': { label: 'Test Workflow', sub: 'End-to-end alert pipeline test' },
+    '/how-it-works': { label: 'How It Works', sub: 'Cortex flow and architecture' },
+  };
+  const pathKey = Object.keys(PAGE_TITLES)
+    .filter((key) => key !== '/')
+    .find((key) => location.pathname.startsWith(key)) || '/';
+  const pageTitle = PAGE_TITLES[pathKey] || PAGE_TITLES['/'];
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -601,19 +616,10 @@ function Shell({ children }) {
         <div className="brand-card">
           <div className="brand-topline">
             <div className="brand-mark">CX</div>
-            <span className="brand-status">Live command</span>
-          </div>
-          <div className="brand-title">
-            <p className="eyebrow">Cortex</p>
-            <h1>Incident Command</h1>
-          </div>
-          <p className="sidebar-copy">
-            Supervisor-led incident intelligence for alerts, evidence, decisions, reports, and SRE learning.
-          </p>
-          <div className="brand-signals" aria-label="Cortex core capabilities">
-            <span>Brain</span>
-            <span>Agents</span>
-            <span>Reports</span>
+            <div>
+              <p className="brand-name">Cortex</p>
+              <span className="brand-status">Live</span>
+            </div>
           </div>
         </div>
         <nav aria-label="Primary navigation">
@@ -643,11 +649,10 @@ function Shell({ children }) {
       <main className="content">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Operational overview</p>
-            <h2>Cortex incident command</h2>
+            <h2>{pageTitle.label}</h2>
+            <p className="topbar-sub">{pageTitle.sub}</p>
           </div>
           <div className="topbar-actions">
-            <span className="topbar-note">Supervisor-first agent logs, evidence, and actions</span>
             <button type="button" className="ghost-button" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
               {theme === 'light' ? 'Dark mode' : 'Light mode'}
             </button>
