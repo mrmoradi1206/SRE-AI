@@ -44,6 +44,7 @@ class VictoriaMetricsConfig(BaseModel):
 
 
 class ElasticsearchConfig(BaseModel):
+    enabled: bool = Field(default=False)
     url: str = Field(default='http://elasticsearch:9200', max_length=500)
     index: str = Field(default='logs-*', max_length=160)
 
@@ -58,7 +59,7 @@ class ObservabilityConfig(BaseModel):
 app = FastAPI(title='observability-agent', version='0.4.0')
 
 
-def _current_urls() -> tuple[str, str, str, str, bool, str]:
+def _current_urls() -> tuple[str, str, str, str, bool, str, bool]:
     config = load_config()
     prometheus_url = config.get('prometheus', {}).get('url', 'http://prometheus:9090')
     vm_config = config.get('victoriametrics', {})
@@ -66,7 +67,15 @@ def _current_urls() -> tuple[str, str, str, str, bool, str]:
     vm_enabled = bool(vm_config.get('enabled', False))
     metrics_datasource = str(config.get('metrics_datasource', 'prometheus')).lower()
     elasticsearch = config.get('elasticsearch', {})
-    return prometheus_url, vm_url, metrics_datasource, elasticsearch.get('url', 'http://elasticsearch:9200'), vm_enabled, elasticsearch.get('index', 'logs-*')
+    return (
+        prometheus_url,
+        vm_url,
+        metrics_datasource,
+        elasticsearch.get('url', 'http://elasticsearch:9200'),
+        vm_enabled,
+        elasticsearch.get('index', 'logs-*'),
+        bool(elasticsearch.get('enabled', False)),
+    )
 
 
 def _metrics_target(prometheus_url: str, vm_url: str, default_datasource: str, requested_datasource: str | None, vm_enabled: bool) -> tuple[str, str]:
@@ -92,7 +101,7 @@ def _default_promql(service: str | None) -> str:
 
 
 async def _collect_observability(payload: ObservabilityAnalyzeRequest) -> dict[str, Any]:
-    prometheus_url, vm_url, metrics_datasource, elasticsearch_url, vm_enabled, index = _current_urls()
+    prometheus_url, vm_url, metrics_datasource, elasticsearch_url, vm_enabled, index, elasticsearch_enabled = _current_urls()
     service = payload.service or 'unknown'
     promql = payload.promql or _default_promql(service)
     metrics: dict[str, Any]
@@ -103,17 +112,26 @@ async def _collect_observability(payload: ObservabilityAnalyzeRequest) -> dict[s
         metrics = {'status': 'ok', 'source': source, 'metrics_url': base_url, 'query': promql, 'data': metrics_data.get('data', {})}
     except httpx.HTTPError as exc:
         metrics = {'status': 'error', 'query': promql, 'error': str(exc), 'data': {}}
-    try:
-        logs = await search_error_logs(service if service != 'unknown' else '', minutes=payload.minutes, index=index, elasticsearch_url=elasticsearch_url)
-        logs['elasticsearch_url'] = elasticsearch_url
-    except httpx.HTTPError as exc:
-        logs = {'status': 'error', 'service': service, 'minutes': payload.minutes, 'index': index, 'entries': [], 'error': str(exc), 'elasticsearch_url': elasticsearch_url}
+    if not elasticsearch_enabled:
+        logs = {
+            'status': 'skipped',
+            'backend': 'elasticsearch',
+            'service': service,
+            'minutes': payload.minutes,
+            'reason': 'Elasticsearch log collection is disabled in observability config.',
+        }
+    else:
+        try:
+            logs = await search_error_logs(service if service != 'unknown' else '', minutes=payload.minutes, index=index, elasticsearch_url=elasticsearch_url)
+            logs['elasticsearch_url'] = elasticsearch_url
+        except httpx.HTTPError as exc:
+            logs = {'status': 'error', 'service': service, 'minutes': payload.minutes, 'index': index, 'entries': [], 'error': str(exc), 'elasticsearch_url': elasticsearch_url}
     return {'service': service, 'metrics': metrics, 'logs': logs}
 
 
 @app.get('/health')
 async def health() -> dict[str, Any]:
-    prometheus_url, vm_url, metrics_datasource, elasticsearch_url, vm_enabled, elasticsearch_index = _current_urls()
+    prometheus_url, vm_url, metrics_datasource, elasticsearch_url, vm_enabled, elasticsearch_index, elasticsearch_enabled = _current_urls()
     return {
         'status': 'ok',
         'service': 'observability-agent',
@@ -122,6 +140,7 @@ async def health() -> dict[str, Any]:
         'victoriametrics_url': vm_url,
         'victoriametrics_enabled': vm_enabled,
         'metrics_datasource': metrics_datasource,
+        'elasticsearch_enabled': elasticsearch_enabled,
         'elasticsearch_url': elasticsearch_url,
         'elasticsearch_index': elasticsearch_index,
         'timestamp': datetime.now(timezone.utc).isoformat(),
@@ -140,7 +159,7 @@ async def put_config(payload: ObservabilityConfig) -> dict[str, Any]:
 
 @app.post('/api/v1/test/prometheus')
 async def test_prometheus() -> dict[str, Any]:
-    prometheus_url, _, _, _, _, _ = _current_urls()
+    prometheus_url, _, _, _, _, _, _ = _current_urls()
     try:
         data = await query_prometheus('up', prometheus_url=prometheus_url)
         return {'ok': True, 'prometheus_url': prometheus_url, 'data': data.get('data', {})}
@@ -150,7 +169,7 @@ async def test_prometheus() -> dict[str, Any]:
 
 @app.post('/api/v1/test/victoriametrics')
 async def test_victoriametrics() -> dict[str, Any]:
-    _, vm_url, _, _, vm_enabled, _ = _current_urls()
+    _, vm_url, _, _, vm_enabled, _, _ = _current_urls()
     if not vm_enabled:
         return {'ok': False, 'victoriametrics_url': vm_url, 'error': 'VictoriaMetrics is disabled in observability config.'}
     try:
@@ -162,7 +181,9 @@ async def test_victoriametrics() -> dict[str, Any]:
 
 @app.post('/api/v1/test/elasticsearch')
 async def test_elasticsearch() -> dict[str, Any]:
-    _, _, _, elasticsearch_url, _, index = _current_urls()
+    _, _, _, elasticsearch_url, _, index, elasticsearch_enabled = _current_urls()
+    if not elasticsearch_enabled:
+        return {'ok': False, 'enabled': False, 'error': 'Elasticsearch is disabled in observability config.'}
     try:
         data = await search_error_logs('', minutes=5, index=index, elasticsearch_url=elasticsearch_url)
         return {'ok': True, 'elasticsearch_url': elasticsearch_url, 'index': index, 'entries': data.get('entries', [])}
@@ -253,7 +274,7 @@ def _parse_recommended_queries(analysis_content: str) -> list[str]:
 
 @app.post('/api/v1/analyze')
 async def analyze_observability(payload: ObservabilityAnalyzeRequest) -> dict[str, Any]:
-    prometheus_url, vm_url, metrics_datasource, elasticsearch_url, vm_enabled, index = _current_urls()
+    prometheus_url, vm_url, metrics_datasource, elasticsearch_url, vm_enabled, index, _ = _current_urls()
     evidence = await _collect_observability(payload)
     selection = get_agent_llm_config('observability')
 
@@ -370,7 +391,7 @@ async def query_observability(payload: QueryRequest) -> dict[str, Any]:
 
 @app.post('/api/v1/metrics/query')
 async def metrics_query(payload: MetricsQueryRequest) -> dict[str, Any]:
-    prometheus_url, vm_url, metrics_datasource, _, vm_enabled, _ = _current_urls()
+    prometheus_url, vm_url, metrics_datasource, _, vm_enabled, _, _ = _current_urls()
     source, base_url = _metrics_target(prometheus_url, vm_url, metrics_datasource, payload.datasource, vm_enabled)
     try:
         data = await query_prometheus(payload.query, payload.time, prometheus_url=base_url)
@@ -391,7 +412,15 @@ async def logs_errors(
     service: str = Query(default='', max_length=160),
     minutes: int = Query(default=60, ge=1, le=1440),
 ) -> dict[str, Any]:
-    _, _, _, elasticsearch_url, _, index = _current_urls()
+    _, _, _, elasticsearch_url, _, index, elasticsearch_enabled = _current_urls()
+    if not elasticsearch_enabled:
+        return {
+            'status': 'skipped',
+            'backend': 'elasticsearch',
+            'service': service,
+            'minutes': minutes,
+            'reason': 'Elasticsearch log collection is disabled in observability config.',
+        }
     try:
         return await search_error_logs(service, minutes=minutes, index=index, elasticsearch_url=elasticsearch_url)
     except httpx.HTTPError as exc:

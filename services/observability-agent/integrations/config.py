@@ -14,6 +14,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     'metrics_datasource': os.getenv('METRICS_DATASOURCE', 'prometheus'),
     'elasticsearch': {
+        'enabled': os.getenv('ELASTICSEARCH_ENABLED', 'false').lower() == 'true',
         'url': os.getenv('ELASTICSEARCH_URL', 'http://elasticsearch:9200'),
         'index': os.getenv('ELASTICSEARCH_INDEX', 'logs-*'),
     },
