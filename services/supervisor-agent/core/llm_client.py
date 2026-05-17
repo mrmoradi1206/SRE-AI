@@ -113,6 +113,7 @@ class SupervisorAdvisor:
         alerts = bundle.get('alerts', [])
         incident_id = str(incident.get('id') or '')
         service = self._service_name(incident_bundle)
+        agent_spec = AGENT_REGISTRY['query_observability']
 
         latest_alert = alerts[-1] if alerts else {}
         latest_payload = latest_alert.get('payload', {}) if isinstance(latest_alert.get('payload'), dict) else {}
@@ -156,9 +157,9 @@ class SupervisorAdvisor:
             'service': service,
         }
         try:
-            async with httpx.AsyncClient(timeout=12.0) as client:
+            async with httpx.AsyncClient(timeout=agent_spec.timeout) as client:
                 analysis_response = await client.post(
-                    AGENT_REGISTRY['query_observability'].endpoint,
+                    agent_spec.endpoint,
                     json={
                         'incident_id': incident_id,
                         'incident': incident,
@@ -185,6 +186,7 @@ class SupervisorAdvisor:
                 'source': 'error',
                 'service': service,
                 'error': type(exc).__name__,
+                'timeout_seconds': agent_spec.timeout,
                 'summary': 'Observability lookup failed; continue with incident context.',
             }
 
@@ -192,6 +194,7 @@ class SupervisorAdvisor:
         bundle = normalize_incident_bundle(incident_bundle)
         incident = bundle.get('incident', {})
         alerts = bundle.get('alerts', [])
+        agent_spec = AGENT_REGISTRY['query_repo_changes']
 
         project_id = query.get('project_id') if isinstance(query, dict) else None
         ref = query.get('ref') if isinstance(query, dict) else None
@@ -218,9 +221,9 @@ class SupervisorAdvisor:
             params['ref'] = ref
 
         try:
-            async with httpx.AsyncClient(timeout=12.0) as client:
+            async with httpx.AsyncClient(timeout=agent_spec.timeout) as client:
                 response = await client.post(
-                    AGENT_REGISTRY['query_repo_changes'].endpoint,
+                    agent_spec.endpoint,
                     json={
                         'incident_id': str(incident.get('id') or ''),
                         'incident': incident,
@@ -241,6 +244,7 @@ class SupervisorAdvisor:
                 'tool': 'query_repo_changes',
                 'source': 'error',
                 'error': type(exc).__name__,
+                'timeout_seconds': agent_spec.timeout,
                 'summary': 'Repo lookup failed or GitLab project is not configured.',
             }
 
@@ -364,6 +368,58 @@ class SupervisorAdvisor:
             return f"Tool call failed ({observation.get('error')})."
         return str(observation.get('summary') or 'Observation recorded.')
 
+    def _coerce_chat_final(self, parsed: dict[str, Any]) -> dict[str, Any]:
+        final = parsed.get('final') if isinstance(parsed.get('final'), dict) else parsed
+        if not isinstance(final, dict):
+            return {'answer': 'I could not produce a confident answer yet.', 'confidence': 'low', 'next_actions': []}
+
+        answer = final.get('answer')
+        if not isinstance(answer, str) or not answer.strip():
+            root_cause = str(final.get('root_cause') or '').strip()
+            impact = str(final.get('impact') or '').strip()
+            recommended_actions = final.get('recommended_actions') if isinstance(final.get('recommended_actions'), list) else []
+            action_lines: list[str] = []
+            for item in recommended_actions[:5]:
+                if isinstance(item, dict):
+                    action_text = str(item.get('action') or '').strip()
+                else:
+                    action_text = str(item).strip()
+                if action_text:
+                    action_lines.append(f'- {action_text}')
+            parts = []
+            if root_cause:
+                parts.append(root_cause)
+            if impact:
+                parts.append(f'Impact: {impact}')
+            if action_lines:
+                parts.append('Recommended next actions:\n' + '\n'.join(action_lines))
+            answer = '\n\n'.join(parts).strip() or 'I could not produce a confident answer yet.'
+
+        confidence = final.get('confidence', 'medium')
+        if isinstance(confidence, (int, float)):
+            if confidence >= 0.8:
+                confidence = 'high'
+            elif confidence >= 0.5:
+                confidence = 'medium'
+            else:
+                confidence = 'low'
+        else:
+            confidence = str(confidence or 'medium').lower()
+
+        next_actions = final.get('next_actions')
+        if not isinstance(next_actions, list):
+            recommended_actions = final.get('recommended_actions') if isinstance(final.get('recommended_actions'), list) else []
+            next_actions = []
+            for item in recommended_actions[:5]:
+                if isinstance(item, dict):
+                    action_text = str(item.get('action') or '').strip()
+                else:
+                    action_text = str(item).strip()
+                if action_text:
+                    next_actions.append(action_text)
+
+        return {'answer': answer, 'confidence': confidence, 'next_actions': next_actions}
+
     async def answer_question(self, incident_bundle: dict, question: str, settings: dict[str, Any]) -> dict[str, Any]:
         incident_id = self._incident_id(incident_bundle)
         bundle = _sanitize_bundle(normalize_incident_bundle(incident_bundle))
@@ -431,10 +487,10 @@ class SupervisorAdvisor:
                     await self.memory.append(incident_id, step)
                     continue
 
-                final = parsed.get('final') if isinstance(parsed.get('final'), dict) else parsed
-                answer = str(final.get('answer') or answer)
-                confidence = str(final.get('confidence') or confidence).lower()
-                next_actions = final.get('next_actions') if isinstance(final.get('next_actions'), list) else []
+                coerced_final = self._coerce_chat_final(parsed)
+                answer = str(coerced_final.get('answer') or answer)
+                confidence = str(coerced_final.get('confidence') or confidence).lower()
+                next_actions = coerced_final.get('next_actions') if isinstance(coerced_final.get('next_actions'), list) else []
                 break
             llm_trace = {'status': 'ok', 'iterations': len(react_trace), 'calls': llm_traces}
         except Exception as exc:  # noqa: BLE001

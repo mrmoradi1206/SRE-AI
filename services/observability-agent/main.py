@@ -172,6 +172,7 @@ async def test_elasticsearch() -> dict[str, Any]:
 
 def _parse_recommended_queries(analysis_content: str) -> list[str]:
     try:
+        import ast
         import json
         import re
 
@@ -179,10 +180,72 @@ def _parse_recommended_queries(analysis_content: str) -> list[str]:
         if text.startswith('```'):
             text = re.sub(r'^```(?:json)?\s*', '', text, re.IGNORECASE)
             text = re.sub(r'\s*```$', '', text)
-        parsed = json.loads(text)
-        queries = parsed.get('recommended_queries', [])
+
+        def _looks_like_promql(query: str) -> bool:
+            value = str(query).strip().lower()
+            if not value:
+                return False
+            if any(token in value for token in ('http://', 'https://', 'curl ', 'get ', 'post ', 'put ', 'delete ')):
+                return False
+            if re.fullmatch(r'[a-z_:][a-z0-9_:]*', value):
+                return True
+            if any(marker in value for marker in (' up', 'up{', '{', '}', '(', ')', 'rate(', 'histogram_quantile(', 'sum(', 'avg(')):
+                return True
+            return False
+
+        def _normalize_query(raw: Any) -> str | None:
+            if isinstance(raw, str):
+                stripped = raw.strip()
+                if stripped.startswith('{') and stripped.endswith('}'):
+                    try:
+                        parsed_item = json.loads(stripped)
+                    except Exception:
+                        parsed_item = None
+                    if parsed_item is None:
+                        try:
+                            parsed_item = ast.literal_eval(stripped)
+                        except Exception:
+                            parsed_item = None
+                    if isinstance(parsed_item, dict):
+                        candidate = parsed_item.get('promql') or parsed_item.get('query') or parsed_item.get('metrics_query')
+                        if isinstance(candidate, str) and _looks_like_promql(candidate):
+                            return candidate.strip()
+                return stripped if _looks_like_promql(stripped) else None
+            if isinstance(raw, dict):
+                candidate = raw.get('promql') or raw.get('query') or raw.get('metrics_query')
+                if isinstance(candidate, str) and _looks_like_promql(candidate):
+                    return candidate.strip()
+            return None
+
+        def _parse_payload(raw_text: str) -> dict[str, Any] | None:
+            try:
+                parsed_payload = json.loads(raw_text)
+            except Exception:
+                parsed_payload = None
+            if isinstance(parsed_payload, dict):
+                return parsed_payload
+            match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+            if not match:
+                return None
+            try:
+                parsed_payload = json.loads(match.group(0))
+            except Exception:
+                return None
+            return parsed_payload if isinstance(parsed_payload, dict) else None
+
+        parsed = _parse_payload(text)
+        queries = parsed.get('recommended_queries', []) if isinstance(parsed, dict) else []
+        if isinstance(queries, (str, dict)):
+            queries = [queries]
         if isinstance(queries, list):
-            return [str(query) for query in queries[:3] if query]
+            output: list[str] = []
+            for query in queries:
+                candidate = _normalize_query(query)
+                if candidate:
+                    output.append(candidate)
+                if len(output) >= 3:
+                    break
+            return output
     except Exception:
         pass
     return []
